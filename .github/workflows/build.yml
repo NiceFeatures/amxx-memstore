@@ -23,7 +23,7 @@ jobs:
     - name: Start Docker Container
       run: |
         docker pull $CONTAINER
-        docker run --name build-container -d -v ${{github.workspace}}:/desktop $CONTAINER tail -f /dev/null
+        docker run --name build-container -d -v ${{ github.workspace }}:/desktop $CONTAINER tail -f /dev/null
 
     - name: Install Development Tools Packages
       env:
@@ -44,7 +44,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: linux32
-        path: ${{github.workspace}}/package
+        path: ${{ github.workspace }}/package
 
   windows:
     name: Windows Build
@@ -71,7 +71,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: win32
-        path: ${{github.workspace}}/package
+        path: ${{ github.workspace }}/package
 
   release:
     name: Automatic Release
@@ -88,7 +88,7 @@ jobs:
 
     - name: Package Release Zips
       run: |
-        sudo apt-get update && sudo apt-get install -y zip
+        sudo apt-get update > /dev/null && sudo apt-get install -y zip > /dev/null
 
         # Create Windows Zip
         cd artifacts/win32 && zip -r ../../memstore-win32.zip addons && cd ../..
@@ -116,22 +116,26 @@ jobs:
 
         echo "Publishing release for tag: $TAG_NAME"
 
-        if ! gh release view "$TAG_NAME" > /dev/null 2>&1; then
-          gh release create "$TAG_NAME" \
-            --title "MemStore $TAG_NAME" \
-            --notes "### MemStore Automated Release $TAG_NAME
+        cat << 'EOF' > release_notes.md
+### MemStore Automated Release
 
 High-performance in-RAM transient cross-map data storage for AMX Mod X (GoldSrc / HLDS).
 
-#### Packages:
-- **\`memstore-universal.zip\`**: Contains both Windows (\`.dll\`) and Linux (\`.so\`) binaries + Pawn include & examples.
-- **\`memstore-win32.zip\`**: Windows 32-bit package.
-- **\`memstore-linux32.zip\`**: Linux 32-bit package (Ubuntu 18.04 container with \`-D_GLIBCXX_USE_CXX11_ABI=0\`).
+#### Packages Included:
+- **`memstore-universal.zip`**: Contains both Windows (`.dll`) and Linux (`.so`) binaries + Pawn include & examples.
+- **`memstore-win32.zip`**: Windows 32-bit module package.
+- **`memstore-linux32.zip`**: Linux 32-bit module package (Ubuntu 18.04 container with `-D_GLIBCXX_USE_CXX11_ABI=0`).
 
 #### Included Scripting:
-- \`include/memstore.inc\`: Complete Pawn API (Key-Value, Leaderboards/Ranks, Key Enumeration).
-- \`plugins/test_memstore.sma\`: 40 automated unit tests + 20,000 ops/sec benchmark + auto map change retention test.
-- \`plugins/example_top15.sma\`: Complete Top 15 Map Deaths ranking with MOTD display." \
+- `include/memstore.inc`: Complete Pawn API (Key-Value, Leaderboards/Ranks, Key Enumeration).
+- `plugins/test_memstore.sma`: 40 automated unit tests + 20,000 ops/sec benchmark + auto map change retention test.
+- `plugins/example_top15.sma`: Complete Top 15 Map Deaths ranking with MOTD display.
+EOF
+
+        if ! gh release view "$TAG_NAME" > /dev/null 2>&1; then
+          gh release create "$TAG_NAME" \
+            --title "MemStore $TAG_NAME" \
+            --notes-file release_notes.md \
             memstore-universal.zip memstore-win32.zip memstore-linux32.zip
         else
           gh release upload "$TAG_NAME" memstore-universal.zip memstore-win32.zip memstore-linux32.zip --clobber
