@@ -200,6 +200,9 @@ native bool:mem_delete_key(const namespace[], const key[]);
  * @param namespace   Namespace/table name.
  *
  * @return            true if namespace was cleared, false if namespace did not exist.
+ *
+ * @note              This only clears the key-value store. Rank data in the same
+ *                    namespace is NOT affected. Use mem_rank_clear() separately.
  */
 native bool:mem_clear_namespace(const namespace[]);
 
@@ -234,6 +237,10 @@ native mem_get_namespace_count(const namespace[]);
  * @param maxlen      Maximum buffer length.
  *
  * @return            true on success, false if index is out of bounds or namespace is empty.
+ *
+ * @note              The iteration order of keys is NOT guaranteed to be stable across
+ *                    calls. Avoid modifying the namespace (inserting or deleting keys)
+ *                    during iteration, as it may cause keys to be skipped or duplicated.
  */
 native bool:mem_get_key_at(const namespace[], index, dest[], maxlen);
 
@@ -318,10 +325,12 @@ native bool:mem_rank_clear(const namespace[]);
 /**
  * Configures global memory limits to safeguard against server memory exhaustion.
  *
- * @param max_keys_per_ns Maximum allowed keys per namespace (default: 10000).
- * @param max_array_size  Maximum allowed array elements per key (default: 4096).
- * @param max_string_len  Maximum allowed string characters per key (default: 4096).
+ * @param max_keys_per_ns  Maximum allowed keys per namespace (default: 10000).
+ * @param max_array_size   Maximum allowed array elements per key (default: 4096).
+ * @param max_string_len   Maximum allowed string characters per key (default: 4096).
+ * @param max_namespaces   Maximum allowed distinct namespaces (default: 1000). Applies to both
+ *                         key-value and rank namespaces independently.
  *
- * @return                true on success.
+ * @return                 true on success.
  */
-native mem_set_limits(max_keys_per_ns = 10000, max_array_size = 4096, max_string_len = 4096);
+native mem_set_limits(max_keys_per_ns = 10000, max_array_size = 4096, max_string_len = 4096, max_namespaces = 1000);

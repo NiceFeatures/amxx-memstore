@@ -10,9 +10,9 @@
 
 // Module info
 #define MODULE_NAME "MemStore"
-#define MODULE_VERSION "1.0.0"
+#define MODULE_VERSION "1.1.0"
 #define MODULE_AUTHOR "iceeedR"
-#define MODULE_URL "https://github.com/alliedmodders/amxmodx"
+#define MODULE_URL "https://github.com/NiceFeatures/amxx-memstore"
 #define MODULE_LOGTAG "MEMSTORE"
 #define MODULE_LIBRARY "memstore"
 #define MODULE_LIBCLASS ""

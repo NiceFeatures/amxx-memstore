@@ -132,10 +132,11 @@ public:
 	void ClearAll();
 
 	// Safety limits configuration
-	void SetLimits(size_t maxKeysPerNs, size_t maxArraySize, size_t maxStringLen);
+	void SetLimits(size_t maxKeysPerNs, size_t maxArraySize, size_t maxStringLen, size_t maxNamespaces = 0);
 	size_t GetMaxKeysPerNs() const { return m_MaxKeysPerNamespace; }
 	size_t GetMaxArraySize() const { return m_MaxArraySize; }
 	size_t GetMaxStringLen() const { return m_MaxStringLength; }
+	size_t GetMaxNamespaces() const { return m_MaxNamespaces; }
 
 private:
 	bool CheckNamespaceKeyLimit(const std::string &ns, const std::string &key);
@@ -153,6 +154,7 @@ private:
 	size_t m_MaxKeysPerNamespace;
 	size_t m_MaxArraySize;
 	size_t m_MaxStringLength;
+	size_t m_MaxNamespaces;
 };
 
 extern MemStoreManager g_MemStore;

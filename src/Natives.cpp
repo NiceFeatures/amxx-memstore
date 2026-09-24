@@ -30,6 +30,16 @@ static bool GetNamespaceAndKey(AMX *amx, cell paramNs, cell paramKey, std::strin
 	return true;
 }
 
+static bool IsValidExpirePolicy(cell value)
+{
+	return (value >= 0 && value <= 3);
+}
+
+static bool IsValidRankOrder(cell value)
+{
+	return (value >= 0 && value <= 1);
+}
+
 // native bool:mem_set_int(const namespace[], const key[], value, ExpirePolicy:policy = EXP_PERSISTENT, extra = 0);
 static cell AMX_NATIVE_CALL amxx_mem_set_int(AMX *amx, cell *params)
 {
@@ -40,6 +50,11 @@ static cell AMX_NATIVE_CALL amxx_mem_set_int(AMX *amx, cell *params)
 	}
 
 	cell val = params[3];
+	if (!IsValidExpirePolicy(params[4]))
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[4]);
+		return 0;
+	}
 	ExpirePolicy policy = static_cast<ExpirePolicy>(params[4]);
 	int32_t extra = static_cast<int32_t>(params[5]);
 
@@ -98,6 +113,11 @@ static cell AMX_NATIVE_CALL amxx_mem_set_float(AMX *amx, cell *params)
 	}
 
 	float val = amx_ctof(params[3]);
+	if (!IsValidExpirePolicy(params[4]))
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[4]);
+		return 0;
+	}
 	ExpirePolicy policy = static_cast<ExpirePolicy>(params[4]);
 	int32_t extra = static_cast<int32_t>(params[5]);
 
@@ -159,6 +179,11 @@ static cell AMX_NATIVE_CALL amxx_mem_set_string(AMX *amx, cell *params)
 	char *valStr = MF_GetAmxString(amx, params[3], 2, &len);
 	std::string val = (valStr != nullptr) ? valStr : "";
 
+	if (!IsValidExpirePolicy(params[4]))
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[4]);
+		return 0;
+	}
 	ExpirePolicy policy = static_cast<ExpirePolicy>(params[4]);
 	int32_t extra = static_cast<int32_t>(params[5]);
 
@@ -231,6 +256,11 @@ static cell AMX_NATIVE_CALL amxx_mem_set_array(AMX *amx, cell *params)
 		return 0;
 	}
 
+	if (!IsValidExpirePolicy(params[5]))
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[5]);
+		return 0;
+	}
 	ExpirePolicy policy = static_cast<ExpirePolicy>(params[5]);
 	int32_t extra = static_cast<int32_t>(params[6]);
 
@@ -364,6 +394,11 @@ static cell AMX_NATIVE_CALL amxx_mem_set_expire(AMX *amx, cell *params)
 		return 0;
 	}
 
+	if (!IsValidExpirePolicy(params[3]))
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[3]);
+		return 0;
+	}
 	ExpirePolicy policy = static_cast<ExpirePolicy>(params[3]);
 	int32_t extra = static_cast<int32_t>(params[4]);
 
@@ -427,6 +462,11 @@ static cell AMX_NATIVE_CALL amxx_mem_rank_set(AMX *amx, cell *params)
 	}
 
 	cell score = params[3];
+	if (!IsValidExpirePolicy(params[4]))
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[4]);
+		return 0;
+	}
 	ExpirePolicy policy = static_cast<ExpirePolicy>(params[4]);
 	int32_t extra = static_cast<int32_t>(params[5]);
 
@@ -467,6 +507,11 @@ static cell AMX_NATIVE_CALL amxx_mem_rank_get_pos(AMX *amx, cell *params)
 		return 0;
 	}
 
+	if (!IsValidRankOrder(params[3]))
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid RankOrder value: %d", MODULE_LOGTAG, params[3]);
+		return 0;
+	}
 	RankOrder order = static_cast<RankOrder>(params[3]);
 	return static_cast<cell>(g_MemStore.RankGetPosition(ns, key, order));
 }
@@ -499,6 +544,11 @@ static cell AMX_NATIVE_CALL amxx_mem_rank_get_top(AMX *amx, cell *params)
 	RankOrder order = RankOrder::Desc;
 	if (numParams >= 6)
 	{
+		if (!IsValidRankOrder(params[6]))
+		{
+			MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid RankOrder value: %d", MODULE_LOGTAG, params[6]);
+			return 0;
+		}
 		order = static_cast<RankOrder>(params[6]);
 	}
 
@@ -564,10 +614,19 @@ static cell AMX_NATIVE_CALL amxx_mem_set_limits(AMX *amx, cell *params)
 	cell maxArray = params[2];
 	cell maxStr = params[3];
 
+	size_t maxNs = 0;
+	unsigned int numParams = (*params) / sizeof(cell);
+	if (numParams >= 4)
+	{
+		cell maxNsParam = params[4];
+		maxNs = (maxNsParam > 0) ? static_cast<size_t>(maxNsParam) : 0;
+	}
+
 	g_MemStore.SetLimits(
 		(maxKeys > 0) ? static_cast<size_t>(maxKeys) : 10000,
 		(maxArray > 0) ? static_cast<size_t>(maxArray) : 4096,
-		(maxStr > 0) ? static_cast<size_t>(maxStr) : 4096
+		(maxStr > 0) ? static_cast<size_t>(maxStr) : 4096,
+		maxNs
 	);
 
 	return 1;
