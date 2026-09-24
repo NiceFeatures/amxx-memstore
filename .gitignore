@@ -1,0 +1,35 @@
+# CMake & Makefile build outputs
+build/
+build_linux/
+Release/
+Debug/
+bin/
+obj/
+package/
+
+# Compiled binaries
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.obj
+*.res
+
+# Archives
+*.zip
+*.tar.gz
+
+# IDE / Editor files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.VC.db
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
