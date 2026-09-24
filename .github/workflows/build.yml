@@ -18,60 +18,60 @@ jobs:
     name: Linux Build
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Start Docker Container
-      run: |
-        docker pull $CONTAINER
-        docker run --name build-container -d -v ${{ github.workspace }}:/desktop $CONTAINER tail -f /dev/null
+      - name: Start Docker Container
+        run: |
+          docker pull $CONTAINER
+          docker run --name build-container -d -v ${{ github.workspace }}:/desktop $CONTAINER tail -f /dev/null
 
-    - name: Install Development Tools Packages
-      env:
-        SCRIPT: |
-          dpkg --add-architecture i386
-          apt-get update > /dev/null
-          apt-get install -qq -y pkg-config wget unzip build-essential gcc-multilib g++-multilib make cmake > /dev/null
-      run: docker exec build-container bash -c "$SCRIPT"
+      - name: Install Development Tools Packages
+        env:
+          SCRIPT: |
+            dpkg --add-architecture i386
+            apt-get update > /dev/null
+            apt-get install -qq -y pkg-config wget unzip build-essential gcc-multilib g++-multilib make cmake > /dev/null
+        run: docker exec build-container bash -c "$SCRIPT"
 
-    - name: Execute Build
-      env:
-        SCRIPT: |
-          cd /desktop
-          make
-      run: docker exec build-container bash -c "$SCRIPT"
+      - name: Execute Build
+        env:
+          SCRIPT: |
+            cd /desktop
+            make
+        run: docker exec build-container bash -c "$SCRIPT"
 
-    - name: Deploy artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: linux32
-        path: ${{ github.workspace }}/package
+      - name: Deploy artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux32
+          path: ${{ github.workspace }}/package
 
   windows:
     name: Windows Build
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Configure CMake
-      run: cmake -B build -A Win32 -DCMAKE_BUILD_TYPE=Release
+      - name: Configure CMake
+        run: cmake -B build -A Win32 -DCMAKE_BUILD_TYPE=Release
 
-    - name: Execute Build
-      run: |
-        cmake --build build --config Release
+      - name: Execute Build
+        run: |
+          cmake --build build --config Release
 
-        New-Item -ItemType Directory -Force -Path package/addons/amxmodx/modules
-        New-Item -ItemType Directory -Force -Path package/addons/amxmodx/scripting/include
+          New-Item -ItemType Directory -Force -Path package/addons/amxmodx/modules
+          New-Item -ItemType Directory -Force -Path package/addons/amxmodx/scripting/include
 
-        Copy-Item build/Release/memstore_amxx.dll package/addons/amxmodx/modules/
-        Copy-Item include/memstore.inc package/addons/amxmodx/scripting/include/
-        Copy-Item plugins/test_memstore.sma package/addons/amxmodx/scripting/
-        Copy-Item plugins/example_top15.sma package/addons/amxmodx/scripting/
+          Copy-Item build/Release/memstore_amxx.dll package/addons/amxmodx/modules/
+          Copy-Item include/memstore.inc package/addons/amxmodx/scripting/include/
+          Copy-Item plugins/test_memstore.sma package/addons/amxmodx/scripting/
+          Copy-Item plugins/example_top15.sma package/addons/amxmodx/scripting/
 
-    - name: Deploy artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: win32
-        path: ${{ github.workspace }}/package
+      - name: Deploy artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: win32
+          path: ${{ github.workspace }}/package
 
   release:
     name: Automatic Release
@@ -79,64 +79,62 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
-    - name: Package Release Zips
-      run: |
-        sudo apt-get update > /dev/null && sudo apt-get install -y zip > /dev/null
+      - name: Package Release Zips
+        run: |
+          sudo apt-get update > /dev/null && sudo apt-get install -y zip > /dev/null
 
-        # Create Windows Zip
-        cd artifacts/win32 && zip -r ../../memstore-win32.zip addons && cd ../..
+          # Create Windows Zip
+          cd artifacts/win32 && zip -r ../../memstore-win32.zip addons && cd ../..
 
-        # Create Linux Zip
-        cd artifacts/linux32 && zip -r ../../memstore-linux32.zip addons && cd ../..
+          # Create Linux Zip
+          cd artifacts/linux32 && zip -r ../../memstore-linux32.zip addons && cd ../..
 
-        # Create Universal Package (contains both .dll and .so)
-        mkdir -p universal/addons/amxmodx/modules
-        mkdir -p universal/addons/amxmodx/scripting/include
+          # Create Universal Package (contains both .dll and .so)
+          mkdir -p universal/addons/amxmodx/modules
+          mkdir -p universal/addons/amxmodx/scripting/include
 
-        cp -r artifacts/win32/addons/amxmodx/* universal/addons/amxmodx/
-        cp -r artifacts/linux32/addons/amxmodx/modules/* universal/addons/amxmodx/modules/
+          cp -r artifacts/win32/addons/amxmodx/* universal/addons/amxmodx/
+          cp -r artifacts/linux32/addons/amxmodx/modules/* universal/addons/amxmodx/modules/
 
-        cd universal && zip -r ../memstore-universal.zip addons && cd ..
+          cd universal && zip -r ../memstore-universal.zip addons && cd ..
 
-    - name: Create or Update GitHub Release
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        TAG_NAME="${GITHUB_REF_NAME}"
-        if [ "$TAG_NAME" = "main" ]; then
-          TAG_NAME="v1.0.0"
-        fi
+      - name: Create or Update GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          if [ "$TAG_NAME" = "main" ]; then
+            TAG_NAME="v1.0.0"
+          fi
 
-        echo "Publishing release for tag: $TAG_NAME"
+          echo "Publishing release for tag: $TAG_NAME"
 
-        cat << 'EOF' > release_notes.md
-### MemStore Automated Release
+          echo "### MemStore Automated Release $TAG_NAME" > release_notes.md
+          echo "" >> release_notes.md
+          echo "High-performance in-RAM transient cross-map data storage for AMX Mod X (GoldSrc / HLDS)." >> release_notes.md
+          echo "" >> release_notes.md
+          echo "#### Packages Included:" >> release_notes.md
+          echo "- **memstore-universal.zip**: Universal package with both Windows (.dll) and Linux (.so) binaries + Pawn include & examples." >> release_notes.md
+          echo "- **memstore-win32.zip**: Windows 32-bit module package." >> release_notes.md
+          echo "- **memstore-linux32.zip**: Linux 32-bit module package (Ubuntu 18.04 container with -D_GLIBCXX_USE_CXX11_ABI=0)." >> release_notes.md
+          echo "" >> release_notes.md
+          echo "#### Included Scripting:" >> release_notes.md
+          echo "- include/memstore.inc: Complete Pawn API (Key-Value, Leaderboards/Ranks, Key Enumeration)." >> release_notes.md
+          echo "- plugins/test_memstore.sma: 40 automated unit tests + 20,000 ops/sec benchmark + auto map change retention test." >> release_notes.md
+          echo "- plugins/example_top15.sma: Complete Top 15 Map Deaths ranking with MOTD display." >> release_notes.md
 
-High-performance in-RAM transient cross-map data storage for AMX Mod X (GoldSrc / HLDS).
-
-#### Packages Included:
-- **`memstore-universal.zip`**: Contains both Windows (`.dll`) and Linux (`.so`) binaries + Pawn include & examples.
-- **`memstore-win32.zip`**: Windows 32-bit module package.
-- **`memstore-linux32.zip`**: Linux 32-bit module package (Ubuntu 18.04 container with `-D_GLIBCXX_USE_CXX11_ABI=0`).
-
-#### Included Scripting:
-- `include/memstore.inc`: Complete Pawn API (Key-Value, Leaderboards/Ranks, Key Enumeration).
-- `plugins/test_memstore.sma`: 40 automated unit tests + 20,000 ops/sec benchmark + auto map change retention test.
-- `plugins/example_top15.sma`: Complete Top 15 Map Deaths ranking with MOTD display.
-EOF
-
-        if ! gh release view "$TAG_NAME" > /dev/null 2>&1; then
-          gh release create "$TAG_NAME" \
-            --title "MemStore $TAG_NAME" \
-            --notes-file release_notes.md \
-            memstore-universal.zip memstore-win32.zip memstore-linux32.zip
-        else
-          gh release upload "$TAG_NAME" memstore-universal.zip memstore-win32.zip memstore-linux32.zip --clobber
-        fi
+          if ! gh release view "$TAG_NAME" > /dev/null 2>&1; then
+            gh release create "$TAG_NAME" \
+              --title "MemStore $TAG_NAME" \
+              --notes-file release_notes.md \
+              memstore-universal.zip memstore-win32.zip memstore-linux32.zip
+          else
+            gh release upload "$TAG_NAME" memstore-universal.zip memstore-win32.zip memstore-linux32.zip --clobber
+          fi
