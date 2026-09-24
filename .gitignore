@@ -33,3 +33,6 @@ package/
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
+
+# AG Kit (AI agent framework)
+.agents/

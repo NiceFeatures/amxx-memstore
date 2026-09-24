@@ -26,7 +26,8 @@ MemStoreManager::MemStoreManager()
 	: m_RankSequenceCounter(0),
 	  m_MaxKeysPerNamespace(10000),
 	  m_MaxArraySize(4096),
-	  m_MaxStringLength(4096)
+	  m_MaxStringLength(4096),
+	  m_MaxNamespaces(1000)
 {
 }
 
@@ -35,7 +36,7 @@ MemStoreManager::~MemStoreManager()
 	ClearAll();
 }
 
-void MemStoreManager::SetLimits(size_t maxKeysPerNs, size_t maxArraySize, size_t maxStringLen)
+void MemStoreManager::SetLimits(size_t maxKeysPerNs, size_t maxArraySize, size_t maxStringLen, size_t maxNamespaces)
 {
 	if (maxKeysPerNs > 0)
 	{
@@ -49,6 +50,10 @@ void MemStoreManager::SetLimits(size_t maxKeysPerNs, size_t maxArraySize, size_t
 	{
 		m_MaxStringLength = maxStringLen;
 	}
+	if (maxNamespaces > 0)
+	{
+		m_MaxNamespaces = maxNamespaces;
+	}
 }
 
 void MemStoreManager::ApplyExpiration(StoreEntry &entry, ExpirePolicy policy, int32_t extra)
@@ -60,7 +65,9 @@ void MemStoreManager::ApplyExpiration(StoreEntry &entry, ExpirePolicy policy, in
 	}
 	else if (policy == ExpirePolicy::TTL)
 	{
-		entry.expireTimestamp = time(nullptr) + ((extra > 0) ? extra : 60);
+		static const int32_t MAX_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+		int32_t ttl = (extra > 0) ? std::min(extra, MAX_TTL_SECONDS) : 60;
+		entry.expireTimestamp = time(nullptr) + static_cast<time_t>(ttl);
 	}
 	else if (policy == ExpirePolicy::MapEnd)
 	{
@@ -77,7 +84,9 @@ void MemStoreManager::ApplyRankExpiration(RankEntry &entry, ExpirePolicy policy,
 	}
 	else if (policy == ExpirePolicy::TTL)
 	{
-		entry.expireTimestamp = time(nullptr) + ((extra > 0) ? extra : 60);
+		static const int32_t MAX_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+		int32_t ttl = (extra > 0) ? std::min(extra, MAX_TTL_SECONDS) : 60;
+		entry.expireTimestamp = time(nullptr) + static_cast<time_t>(ttl);
 	}
 	else if (policy == ExpirePolicy::MapEnd)
 	{
@@ -98,7 +107,8 @@ bool MemStoreManager::CheckNamespaceKeyLimit(const std::string &ns, const std::s
 		}
 		return nsIt->second.size() < m_MaxKeysPerNamespace;
 	}
-	return true;
+	// New namespace — enforce global namespace limit
+	return m_Namespaces.size() < m_MaxNamespaces;
 }
 
 bool MemStoreManager::SetInt(const std::string &ns, const std::string &key, cell val, ExpirePolicy policy, int32_t extra)
@@ -113,7 +123,9 @@ bool MemStoreManager::SetInt(const std::string &ns, const std::string &key, cell
 	entry.cellValue = val;
 	entry.floatValue = 0.0f;
 	entry.stringValue.clear();
+	entry.stringValue.shrink_to_fit();
 	entry.arrayValue.clear();
+	entry.arrayValue.shrink_to_fit();
 	ApplyExpiration(entry, policy, extra);
 
 	return true;
@@ -170,7 +182,9 @@ bool MemStoreManager::SetFloat(const std::string &ns, const std::string &key, fl
 	entry.cellValue = 0;
 	entry.floatValue = val;
 	entry.stringValue.clear();
+	entry.stringValue.shrink_to_fit();
 	entry.arrayValue.clear();
+	entry.arrayValue.shrink_to_fit();
 	ApplyExpiration(entry, policy, extra);
 
 	return true;
@@ -225,6 +239,10 @@ bool MemStoreManager::SetString(const std::string &ns, const std::string &key, c
 	std::string stored = val;
 	if (stored.length() > m_MaxStringLength)
 	{
+		MF_Log("[%s] WARNING: String for key '%s' in namespace '%s' truncated from %u to %u chars.",
+			MODULE_LOGTAG, key.c_str(), ns.c_str(),
+			static_cast<unsigned int>(stored.length()),
+			static_cast<unsigned int>(m_MaxStringLength));
 		stored.resize(m_MaxStringLength);
 	}
 
@@ -232,8 +250,9 @@ bool MemStoreManager::SetString(const std::string &ns, const std::string &key, c
 	entry.type = EntryType::String;
 	entry.cellValue = 0;
 	entry.floatValue = 0.0f;
-	entry.stringValue = stored;
+	entry.stringValue = std::move(stored);
 	entry.arrayValue.clear();
+	entry.arrayValue.shrink_to_fit();
 	ApplyExpiration(entry, policy, extra);
 
 	return true;
@@ -292,6 +311,7 @@ bool MemStoreManager::SetArray(const std::string &ns, const std::string &key, co
 	entry.cellValue = 0;
 	entry.floatValue = 0.0f;
 	entry.stringValue.clear();
+	entry.stringValue.shrink_to_fit();
 	entry.arrayValue.assign(data, data + clampedSize);
 	ApplyExpiration(entry, policy, extra);
 
@@ -350,6 +370,13 @@ size_t MemStoreManager::GetArraySize(const std::string &ns, const std::string &k
 	auto keyIt = nsIt->second.find(key);
 	if (keyIt == nsIt->second.end())
 	{
+		return 0;
+	}
+
+	time_t now = time(nullptr);
+	if (keyIt->second.IsExpired(now))
+	{
+		nsIt->second.erase(keyIt);
 		return 0;
 	}
 
@@ -522,6 +549,16 @@ bool MemStoreManager::GetKeyAt(const std::string &ns, size_t index, std::string 
 // --------------------------------------------------
 bool MemStoreManager::RankSet(const std::string &ns, const std::string &key, cell score, ExpirePolicy policy, int32_t extra)
 {
+	auto rankNsIt = m_Ranks.find(ns);
+	if (rankNsIt == m_Ranks.end())
+	{
+		// New rank namespace — enforce global limit
+		if (m_Ranks.size() >= m_MaxNamespaces)
+		{
+			return false;
+		}
+	}
+
 	auto &rankMap = m_Ranks[ns];
 	auto it = rankMap.find(key);
 	if (it == rankMap.end())
@@ -534,7 +571,7 @@ bool MemStoreManager::RankSet(const std::string &ns, const std::string &key, cel
 
 	RankEntry &entry = rankMap[key];
 	entry.score = score;
-	entry.sequence = ++m_RankSequenceCounter; // Monotonic sequence for deterministic tie-breaking
+	entry.sequence = ++m_RankSequenceCounter;
 	ApplyRankExpiration(entry, policy, extra);
 
 	return true;
