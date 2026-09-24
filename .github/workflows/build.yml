@@ -77,7 +77,7 @@ jobs:
     name: Automatic Release
     needs: [linux, windows]
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
+    if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
     steps:
       - uses: actions/checkout@v4
 
@@ -109,9 +109,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG_NAME="${GITHUB_REF_NAME}"
-          if [ "$TAG_NAME" = "main" ]; then
-            TAG_NAME="v1.0.0"
+          MODULE_VER=$(awk -F'"' '/#define MODULE_VERSION/ {print $2}' src/moduleconfig.h)
+          if [ -z "$MODULE_VER" ]; then
+            MODULE_VER="1.1.0"
+          fi
+
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG_NAME="${GITHUB_REF_NAME}"
+          else
+            TAG_NAME="v${MODULE_VER}"
           fi
 
           echo "Publishing release for tag: $TAG_NAME"
