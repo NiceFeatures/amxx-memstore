@@ -12,8 +12,8 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 #endif //_WIN32
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,0
- PRODUCTVERSION 1,0,0,0
+ FILEVERSION 1,2,0,0
+ PRODUCTVERSION 1,2,0,0
  FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -30,12 +30,12 @@ BEGIN
         BEGIN
             VALUE "Comments", "AMX Mod X In-RAM Transient Storage Module"
             VALUE "FileDescription", "MemStore Module for AMX Mod X"
-            VALUE "FileVersion", "1.0.0"
+            VALUE "FileVersion", "1.2.0"
             VALUE "InternalName", "memstore"
             VALUE "LegalCopyright", "Copyright (c) 2026 iceeedR"
             VALUE "OriginalFilename", "memstore_amxx.dll"
             VALUE "ProductName", "MemStore"
-            VALUE "ProductVersion", "1.0.0"
+            VALUE "ProductVersion", "1.2.0"
         END
     END
     BLOCK "VarFileInfo"

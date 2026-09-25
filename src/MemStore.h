@@ -11,8 +11,9 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
-#include <ctime>
+#include <chrono>
 #include <cstdint>
+#include <algorithm>
 #include "amxxmodule.h"
 
 enum class ExpirePolicy : int32_t
@@ -20,7 +21,7 @@ enum class ExpirePolicy : int32_t
 	Persistent = 0, // Survives maps indefinitely until HLDS shutdown/restart or manual deletion
 	MapEnd     = 1, // Cleared automatically on next map change
 	MapCount   = 2, // Survives for N map changes, then expires
-	TTL        = 3  // Expires after N seconds based on wall-clock time
+	TTL        = 3  // Expires after N seconds based on monotonic steady clock
 };
 
 enum class EntryType : int32_t
@@ -45,18 +46,18 @@ struct StoreEntry
 	EntryType type = EntryType::None;
 	ExpirePolicy policy = ExpirePolicy::Persistent;
 	int32_t mapCounter = 0;
-	time_t expireTimestamp = 0;
+	std::chrono::steady_clock::time_point expireTime = {};
 
 	cell cellValue = 0;
 	float floatValue = 0.0f;
 	std::string stringValue;
 	std::vector<cell> arrayValue;
 
-	bool IsExpired(time_t now) const
+	bool IsExpired(std::chrono::steady_clock::time_point now) const
 	{
 		if (policy == ExpirePolicy::TTL)
 		{
-			return (now >= expireTimestamp);
+			return (now >= expireTime);
 		}
 		if (policy == ExpirePolicy::MapCount)
 		{
@@ -72,13 +73,13 @@ struct RankEntry
 	uint64_t sequence = 0; // Monotonic sequence for tie-breaking
 	ExpirePolicy policy = ExpirePolicy::Persistent;
 	int32_t mapCounter = 0;
-	time_t expireTimestamp = 0;
+	std::chrono::steady_clock::time_point expireTime = {};
 
-	bool IsExpired(time_t now) const
+	bool IsExpired(std::chrono::steady_clock::time_point now) const
 	{
 		if (policy == ExpirePolicy::TTL)
 		{
-			return (now >= expireTimestamp);
+			return (now >= expireTime);
 		}
 		if (policy == ExpirePolicy::MapCount)
 		{
@@ -117,6 +118,7 @@ public:
 
 	// Feature B: Key Enumeration / Iteration
 	bool GetKeyAt(const std::string &ns, size_t index, std::string &keyOut);
+	std::vector<std::string> GetActiveKeys(const std::string &ns);
 
 	// Feature A: Native Rank / Leaderboard Engine (Sorted Sets)
 	bool RankSet(const std::string &ns, const std::string &key, cell score, ExpirePolicy policy, int32_t extra);
@@ -132,16 +134,20 @@ public:
 	void ClearAll();
 
 	// Safety limits configuration
-	void SetLimits(size_t maxKeysPerNs, size_t maxArraySize, size_t maxStringLen, size_t maxNamespaces = 0);
+	void SetLimits(size_t maxKeysPerNs, size_t maxArraySize, size_t maxStringLen, size_t maxNamespaces = 0, size_t maxMemoryMb = 0);
 	size_t GetMaxKeysPerNs() const { return m_MaxKeysPerNamespace; }
 	size_t GetMaxArraySize() const { return m_MaxArraySize; }
 	size_t GetMaxStringLen() const { return m_MaxStringLength; }
 	size_t GetMaxNamespaces() const { return m_MaxNamespaces; }
+	size_t GetMaxMemoryBytes() const { return m_MaxMemoryBytes; }
+	size_t GetApproxMemoryUsed() const { return m_ApproxMemoryUsed; }
 
 private:
 	bool CheckNamespaceKeyLimit(const std::string &ns, const std::string &key);
+	bool CheckMemoryLimit(size_t additionalBytes);
 	void ApplyExpiration(StoreEntry &entry, ExpirePolicy policy, int32_t extra);
 	void ApplyRankExpiration(RankEntry &entry, ExpirePolicy policy, int32_t extra);
+	void InvalidateKeyCache(const std::string &ns);
 
 	using KeyMap = std::unordered_map<std::string, StoreEntry>;
 	std::unordered_map<std::string, KeyMap> m_Namespaces;
@@ -149,12 +155,21 @@ private:
 	using RankMap = std::unordered_map<std::string, RankEntry>;
 	std::unordered_map<std::string, RankMap> m_Ranks;
 
+	struct KeyCache
+	{
+		std::vector<std::string> keys;
+		bool valid = false;
+	};
+	std::unordered_map<std::string, KeyCache> m_KeyCaches;
+
 	uint64_t m_RankSequenceCounter;
 
 	size_t m_MaxKeysPerNamespace;
 	size_t m_MaxArraySize;
 	size_t m_MaxStringLength;
 	size_t m_MaxNamespaces;
+	size_t m_MaxMemoryBytes;
+	size_t m_ApproxMemoryUsed;
 };
 
 extern MemStoreManager g_MemStore;

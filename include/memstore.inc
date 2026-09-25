@@ -10,6 +10,10 @@
 #endif
 #define _memstore_included
 
+#if !defined _float_included
+	#include <float>
+#endif
+
 #pragma reqlib memstore
 #if !defined AMXMODX_NOAUTOLOAD
 	#pragma loadlib memstore
@@ -23,7 +27,7 @@ enum ExpirePolicy
 	EXP_PERSISTENT = 0, /**< Retains data in RAM across map changes until server reboot or manual removal */
 	EXP_MAP_END    = 1, /**< Automatically cleared on the next map change */
 	EXP_MAP_COUNT  = 2, /**< Survives for N map changes (specify N in 'extra' parameter) */
-	EXP_TTL        = 3  /**< Expires after N seconds based on wall-clock time (specify seconds in 'extra') */
+	EXP_TTL        = 3  /**< Expires after N seconds based on monotonic steady clock (specify seconds in 'extra') */
 };
 
 /**
@@ -229,7 +233,7 @@ native mem_get_namespace_count(const namespace[]);
 
 /**
  * Retrieves the key name at a specific 0-based index in a namespace.
- * Useful for iterating through all stored keys without handles or allocations.
+ * Uses internal caching for fast sequential index iterations.
  *
  * @param namespace   Namespace/table name.
  * @param index       0-based index (from 0 to mem_get_namespace_count() - 1).
@@ -237,12 +241,21 @@ native mem_get_namespace_count(const namespace[]);
  * @param maxlen      Maximum buffer length.
  *
  * @return            true on success, false if index is out of bounds or namespace is empty.
- *
- * @note              The iteration order of keys is NOT guaranteed to be stable across
- *                    calls. Avoid modifying the namespace (inserting or deleting keys)
- *                    during iteration, as it may cause keys to be skipped or duplicated.
  */
 native bool:mem_get_key_at(const namespace[], index, dest[], maxlen);
+
+/**
+ * Iterates through all active keys in a namespace using a public callback function.
+ *
+ * @param namespace         Namespace name to iterate.
+ * @param callback_function Name of the public callback function in the calling plugin:
+ *                          public MyCallback(const key[], any:data)
+ *                          Return PLUGIN_CONTINUE to continue, or PLUGIN_HANDLED to stop early.
+ * @param data              Optional extra user data passed into each callback invocation.
+ *
+ * @return                  Number of keys iterated through, or 0 on error.
+ */
+native mem_iterate_keys(const namespace[], const callback_function[], any:data = 0);
 
 /**
  * Sets or updates a score for a key in a sorted rank leaderboard.
@@ -323,14 +336,15 @@ native bool:mem_rank_delete(const namespace[], const key[]);
 native bool:mem_rank_clear(const namespace[]);
 
 /**
- * Configures global memory limits to safeguard against server memory exhaustion.
+ * Configures global memory limits to safeguard against 32-bit server memory exhaustion.
  *
- * @param max_keys_per_ns  Maximum allowed keys per namespace (default: 10000).
+ * @param max_keys_per_ns  Maximum allowed keys per namespace (default: 5000).
  * @param max_array_size   Maximum allowed array elements per key (default: 4096).
  * @param max_string_len   Maximum allowed string characters per key (default: 4096).
- * @param max_namespaces   Maximum allowed distinct namespaces (default: 1000). Applies to both
+ * @param max_namespaces   Maximum allowed distinct namespaces (default: 200). Applies to both
  *                         key-value and rank namespaces independently.
+ * @param max_memory_mb    Maximum aggregate RAM quota in megabytes (default: 64).
  *
  * @return                 true on success.
  */
-native mem_set_limits(max_keys_per_ns = 10000, max_array_size = 4096, max_string_len = 4096, max_namespaces = 1000);
+native mem_set_limits(max_keys_per_ns = 5000, max_array_size = 4096, max_string_len = 4096, max_namespaces = 200, max_memory_mb = 64);

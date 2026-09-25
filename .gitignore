@@ -36,3 +36,6 @@ cmake_install.cmake
 
 # AG Kit (AI agent framework)
 .agents/
+
+# Tool artifacts
+graphify-out/

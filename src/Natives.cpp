@@ -6,6 +6,7 @@
 // Author: iceeedR
 //
 #include "MemStore.h"
+#include <new>
 
 // Helper to validate and extract namespace and key
 static bool GetNamespaceAndKey(AMX *amx, cell paramNs, cell paramKey, std::string &nsOut, std::string &keyOut)
@@ -58,13 +59,7 @@ static cell AMX_NATIVE_CALL amxx_mem_set_int(AMX *amx, cell *params)
 	ExpirePolicy policy = static_cast<ExpirePolicy>(params[4]);
 	int32_t extra = static_cast<int32_t>(params[5]);
 
-	if (!g_MemStore.SetInt(ns, key, val, policy, extra))
-	{
-		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Namespace '%s' reached key limit (%u keys)! Set rejected.", MODULE_LOGTAG, ns.c_str(), static_cast<unsigned int>(g_MemStore.GetMaxKeysPerNs()));
-		return 0;
-	}
-
-	return 1;
+	return g_MemStore.SetInt(ns, key, val, policy, extra) ? 1 : 0;
 }
 
 // native bool:mem_get_int(const namespace[], const key[], &value, default_val = 0);
@@ -121,13 +116,7 @@ static cell AMX_NATIVE_CALL amxx_mem_set_float(AMX *amx, cell *params)
 	ExpirePolicy policy = static_cast<ExpirePolicy>(params[4]);
 	int32_t extra = static_cast<int32_t>(params[5]);
 
-	if (!g_MemStore.SetFloat(ns, key, val, policy, extra))
-	{
-		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Namespace '%s' reached key limit (%u keys)! Set rejected.", MODULE_LOGTAG, ns.c_str(), static_cast<unsigned int>(g_MemStore.GetMaxKeysPerNs()));
-		return 0;
-	}
-
-	return 1;
+	return g_MemStore.SetFloat(ns, key, val, policy, extra) ? 1 : 0;
 }
 
 // native bool:mem_get_float(const namespace[], const key[], &Float:value, Float:default_val = 0.0);
@@ -187,13 +176,7 @@ static cell AMX_NATIVE_CALL amxx_mem_set_string(AMX *amx, cell *params)
 	ExpirePolicy policy = static_cast<ExpirePolicy>(params[4]);
 	int32_t extra = static_cast<int32_t>(params[5]);
 
-	if (!g_MemStore.SetString(ns, key, val, policy, extra))
-	{
-		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Namespace '%s' reached key limit (%u keys)! Set rejected.", MODULE_LOGTAG, ns.c_str(), static_cast<unsigned int>(g_MemStore.GetMaxKeysPerNs()));
-		return 0;
-	}
-
-	return 1;
+	return g_MemStore.SetString(ns, key, val, policy, extra) ? 1 : 0;
 }
 
 // native bool:mem_get_string(const namespace[], const key[], dest[], maxlen, const default_val[] = "");
@@ -264,13 +247,7 @@ static cell AMX_NATIVE_CALL amxx_mem_set_array(AMX *amx, cell *params)
 	ExpirePolicy policy = static_cast<ExpirePolicy>(params[5]);
 	int32_t extra = static_cast<int32_t>(params[6]);
 
-	if (!g_MemStore.SetArray(ns, key, arrPtr, static_cast<size_t>(size), policy, extra))
-	{
-		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Namespace '%s' reached key limit (%u keys)! Set rejected.", MODULE_LOGTAG, ns.c_str(), static_cast<unsigned int>(g_MemStore.GetMaxKeysPerNs()));
-		return 0;
-	}
-
-	return 1;
+	return g_MemStore.SetArray(ns, key, arrPtr, static_cast<size_t>(size), policy, extra) ? 1 : 0;
 }
 
 // native bool:mem_get_array(const namespace[], const key[], any:dest[], maxlen, &copied_size = 0);
@@ -296,9 +273,10 @@ static cell AMX_NATIVE_CALL amxx_mem_get_array(AMX *amx, cell *params)
 		return 0;
 	}
 
+	// TASK 1: Check params[5] != 0 so omitting default parameter does NOT corrupt address 0 of plugin memory!
 	cell *copiedSizeAddr = nullptr;
 	unsigned int numParams = (*params) / sizeof(cell);
-	if (numParams >= 5)
+	if (numParams >= 5 && params[5] != 0)
 	{
 		copiedSizeAddr = MF_GetAmxAddr(amx, params[5]);
 	}
@@ -452,6 +430,56 @@ static cell AMX_NATIVE_CALL amxx_mem_get_key_at(AMX *amx, cell *params)
 	return 1;
 }
 
+// native mem_iterate_keys(const namespace[], const callback_function[], any:data = 0);
+static cell AMX_NATIVE_CALL amxx_mem_iterate_keys(AMX *amx, cell *params)
+{
+	int len = 0;
+	char *nsStr = MF_GetAmxString(amx, params[1], 0, &len);
+	if (!nsStr || len == 0)
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Namespace name cannot be empty!", MODULE_LOGTAG);
+		return 0;
+	}
+
+	char *funcName = MF_GetAmxString(amx, params[2], 1, &len);
+	if (!funcName || len == 0)
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Callback function name cannot be empty!", MODULE_LOGTAG);
+		return 0;
+	}
+
+	cell extraData = 0;
+	unsigned int numParams = (*params) / sizeof(cell);
+	if (numParams >= 3)
+	{
+		extraData = params[3];
+	}
+
+	int forwardId = MF_RegisterSPForwardByName(amx, funcName, FP_STRING, FP_CELL, FP_DONE);
+	if (forwardId <= 0)
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Callback function '%s' not found in plugin!", MODULE_LOGTAG, funcName);
+		return 0;
+	}
+
+	std::vector<std::string> keys = g_MemStore.GetActiveKeys(nsStr);
+	cell count = 0;
+
+	for (const auto &k : keys)
+	{
+		cell ret = MF_ExecuteForward(forwardId, k.c_str(), extraData);
+		++count;
+		// PLUGIN_HANDLED (1) aborts iteration early
+		if (ret == 1)
+		{
+			break;
+		}
+	}
+
+	MF_UnregisterSPForward(forwardId);
+	return count;
+}
+
 // native bool:mem_rank_set(const namespace[], const key[], score, ExpirePolicy:policy = EXP_PERSISTENT, extra = 0);
 static cell AMX_NATIVE_CALL amxx_mem_rank_set(AMX *amx, cell *params)
 {
@@ -534,9 +562,10 @@ static cell AMX_NATIVE_CALL amxx_mem_rank_get_top(AMX *amx, cell *params)
 		return 0;
 	}
 
+	// TASK 1: Check params[5] != 0 so omitting default parameter does NOT corrupt address 0 of plugin memory!
 	cell *scoreAddr = nullptr;
 	unsigned int numParams = (*params) / sizeof(cell);
-	if (numParams >= 5)
+	if (numParams >= 5 && params[5] != 0)
 	{
 		scoreAddr = MF_GetAmxAddr(amx, params[5]);
 	}
@@ -576,6 +605,7 @@ static cell AMX_NATIVE_CALL amxx_mem_rank_get_count(AMX *amx, cell *params)
 	char *nsStr = MF_GetAmxString(amx, params[1], 0, &len);
 	if (!nsStr || len == 0)
 	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Namespace name cannot be empty!", MODULE_LOGTAG);
 		return 0;
 	}
 
@@ -601,13 +631,14 @@ static cell AMX_NATIVE_CALL amxx_mem_rank_clear(AMX *amx, cell *params)
 	char *nsStr = MF_GetAmxString(amx, params[1], 0, &len);
 	if (!nsStr || len == 0)
 	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Namespace name cannot be empty!", MODULE_LOGTAG);
 		return 0;
 	}
 
 	return g_MemStore.RankClear(nsStr) ? 1 : 0;
 }
 
-// native mem_set_limits(max_keys_per_ns = 10000, max_array_size = 4096, max_string_len = 4096);
+// native mem_set_limits(max_keys_per_ns = 5000, max_array_size = 4096, max_string_len = 4096, max_namespaces = 200, max_memory_mb = 64);
 static cell AMX_NATIVE_CALL amxx_mem_set_limits(AMX *amx, cell *params)
 {
 	cell maxKeys = params[1];
@@ -615,18 +646,26 @@ static cell AMX_NATIVE_CALL amxx_mem_set_limits(AMX *amx, cell *params)
 	cell maxStr = params[3];
 
 	size_t maxNs = 0;
+	size_t maxMemMb = 0;
 	unsigned int numParams = (*params) / sizeof(cell);
+
 	if (numParams >= 4)
 	{
 		cell maxNsParam = params[4];
 		maxNs = (maxNsParam > 0) ? static_cast<size_t>(maxNsParam) : 0;
 	}
+	if (numParams >= 5)
+	{
+		cell maxMemParam = params[5];
+		maxMemMb = (maxMemParam > 0) ? static_cast<size_t>(maxMemParam) : 0;
+	}
 
 	g_MemStore.SetLimits(
-		(maxKeys > 0) ? static_cast<size_t>(maxKeys) : 10000,
+		(maxKeys > 0) ? static_cast<size_t>(maxKeys) : 5000,
 		(maxArray > 0) ? static_cast<size_t>(maxArray) : 4096,
 		(maxStr > 0) ? static_cast<size_t>(maxStr) : 4096,
-		maxNs
+		maxNs,
+		maxMemMb
 	);
 
 	return 1;
@@ -649,6 +688,7 @@ AMX_NATIVE_INFO MemStore_natives[] = {
 	{"mem_set_expire",          amxx_mem_set_expire},
 	{"mem_get_namespace_count", amxx_mem_get_namespace_count},
 	{"mem_get_key_at",          amxx_mem_get_key_at},
+	{"mem_iterate_keys",        amxx_mem_iterate_keys},
 	{"mem_rank_set",            amxx_mem_rank_set},
 	{"mem_rank_get_score",      amxx_mem_rank_get_score},
 	{"mem_rank_get_pos",        amxx_mem_rank_get_pos},

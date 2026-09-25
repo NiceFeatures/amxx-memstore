@@ -9,6 +9,14 @@
 
 new g_PassedCount = 0;
 new g_FailedCount = 0;
+new g_Sentinel = 12345;
+new g_IteratedCount = 0;
+
+public OnKeyIterated(const key[], any:data)
+{
+	g_IteratedCount++;
+	return PLUGIN_CONTINUE;
+}
 
 public plugin_init()
 {
@@ -392,6 +400,10 @@ public CmdRunTests()
 	TestNamespaceIsolation();
 	TestKeyEnumeration();
 	TestLeaderboardRankEngine();
+	TestOptionalReferenceSafety();
+	TestNamespaceDeletionLeak();
+	TestKeyIteratorCallback();
+	TestMemoryQuotaGuard();
 
 	server_print("--------------------------------------------------");
 	server_print("TOTAL RESULTS: %d PASSED, %d FAILED", g_PassedCount, g_FailedCount);
@@ -519,7 +531,7 @@ TestSafetyLimitsEnforcement()
 	new bool:updateOk = mem_set_int("limit_ns", "k2", 222);
 	Assert("Key limit: update existing key still allowed", updateOk);
 
-	mem_set_limits(10000, 4096, 4096);
+	mem_set_limits(5000, 4096, 4096, 200, 64);
 	mem_clear_namespace("limit_ns");
 }
 
@@ -629,6 +641,116 @@ TestLeaderboardRankEngine()
 	mem_rank_clear("speedrun_board");
 }
 
+TestOptionalReferenceSafety()
+{
+	server_print("[Testing] Optional Reference Pointer Safety (Regression Bug 1)...");
+	new arr[3] = { 11, 22, 33 };
+	mem_set_array("opt_ref_ns", "test_arr", arr, sizeof(arr));
+
+	new readBuf[3];
+	// Omit optional 5th parameter (&copied_size = 0)
+	new bool:ok = mem_get_array("opt_ref_ns", "test_arr", readBuf, sizeof(readBuf));
+	Assert("mem_get_array succeeds with omitted optional copied_size", ok);
+	Assert("mem_get_array did not corrupt plugin address 0", g_Sentinel == 12345);
+
+	mem_rank_set("opt_ref_rank", "PlayerX", 999);
+	new topName[32];
+	// Omit optional 5th parameter (&score = 0)
+	ok = mem_rank_get_top("opt_ref_rank", 1, topName, charsmax(topName));
+	Assert("mem_rank_get_top succeeds with omitted optional score", ok && equal(topName, "PlayerX"));
+	Assert("mem_rank_get_top did not corrupt plugin address 0", g_Sentinel == 12345);
+
+	mem_clear_namespace("opt_ref_ns");
+	mem_rank_clear("opt_ref_rank");
+}
+
+TestNamespaceDeletionLeak()
+{
+	server_print("[Testing] Namespace Deletion Memory Leak & DoS (Regression Bug 2)...");
+	new nsBuf[32];
+	// Create and delete keys in 250 namespaces (which exceeds the default of 200)
+	for (new i = 0; i < 250; i++)
+	{
+		formatex(nsBuf, charsmax(nsBuf), "leak_ns_%d", i);
+		mem_set_int(nsBuf, "temp_key", i);
+		mem_delete_key(nsBuf, "temp_key");
+	}
+
+	// Try creating a new namespace; if empty namespaces leaked, this would fail!
+	new bool:created = mem_set_int("post_leak_ns", "alive", 1);
+	Assert("Can create new namespace after 250 emptied namespaces", created);
+
+	mem_clear_namespace("post_leak_ns");
+}
+
+TestKeyIteratorCallback()
+{
+	server_print("[Testing] Feature: Callback Key Iteration (mem_iterate_keys)...");
+	mem_clear_namespace("iter_ns");
+	mem_set_int("iter_ns", "alpha", 1);
+	mem_set_int("iter_ns", "beta", 2);
+	mem_set_int("iter_ns", "gamma", 3);
+
+	g_IteratedCount = 0;
+	new totalIterated = mem_iterate_keys("iter_ns", "OnKeyIterated", 42);
+	Assert("mem_iterate_keys returns 3 keys", totalIterated == 3);
+	Assert("Callback was executed 3 times", g_IteratedCount == 3);
+
+	mem_clear_namespace("iter_ns");
+}
+
+TestMemoryQuotaGuard()
+{
+	server_print("[Testing] Memory Quota Guard (Attempt to exceed RAM quota)...");
+
+	// Temporarily configure a tight quota of 1 MB for testing
+	mem_set_limits(5000, 4096, 4096, 200, 1);
+
+	// 256 cells = 1,024 bytes (1 KB)
+	new dummyArr[256];
+	for (new i = 0; i < sizeof(dummyArr); i++)
+	{
+		dummyArr[i] = i;
+	}
+
+	new keyName[32];
+	new bool:rejected = false;
+	new insertedCount = 0;
+
+	// Attempt to insert 1,200 keys of 1 KB (~1.2 MB, exceeding the 1 MB quota)
+	for (new i = 0; i < 1200; i++)
+	{
+		formatex(keyName, charsmax(keyName), "k_%d", i);
+		if (!mem_set_array("quota_ns", keyName, dummyArr, sizeof(dummyArr)))
+		{
+			rejected = true;
+			break;
+		}
+		insertedCount++;
+	}
+
+	Assert("Memory quota guard: successfully blocked excess allocation", rejected);
+	Assert("Memory quota guard: accepted entries before quota was reached", insertedCount > 0);
+
+	// Verify that reading existing keys remains functional even when quota is reached
+	new testRead[10];
+	new copied = 0;
+	new bool:readOk = mem_get_array("quota_ns", "k_0", testRead, sizeof(testRead), copied);
+	Assert("Memory quota guard: existing keys remain intact and readable", readOk && testRead[0] == 0);
+
+	// Clear namespace and verify quota is reclaimed
+	mem_clear_namespace("quota_ns");
+
+	// After clearing, we should be able to insert again
+	new bool:reInsertOk = mem_set_array("quota_ns", "fresh_key", dummyArr, sizeof(dummyArr));
+	Assert("Memory quota guard: memory quota reclaimed after namespace cleared", reInsertOk);
+
+	mem_clear_namespace("quota_ns");
+
+	// Restore default 64 MB limits
+	mem_set_limits(5000, 4096, 4096, 200, 64);
+}
+
 // --------------------------------------------------
 // HIGH-SPEED BENCHMARK WITH FILE LOGGING
 // --------------------------------------------------
@@ -685,7 +807,7 @@ ExecuteBenchmark(&writeOpsOut, &readOpsOut, &writeMsOut, &readMsOut)
 	server_print("  20,000 In-RAM Reads:  %d ms (%.4f sec) -> %d ops/sec [Matches: %d]", readMs, readSec, readOpsOut, matches);
 
 	mem_clear_namespace("bench_ns");
-	mem_set_limits(10000, 4096, 4096);
+	mem_set_limits(5000, 4096, 4096, 200, 64);
 
 	server_print("--------------------------------------------------");
 }
