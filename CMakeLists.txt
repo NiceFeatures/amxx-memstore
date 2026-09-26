@@ -90,5 +90,7 @@ install(FILES include/memstore.inc
 install(FILES 
     plugins/test_memstore.sma
     plugins/example_top15.sma
+    plugins/example_mapstats.sma
+    plugins/example_loadout.sma
     DESTINATION addons/amxmodx/scripting
 )

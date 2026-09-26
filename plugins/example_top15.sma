@@ -6,13 +6,11 @@
 #define PLUGIN_VERSION "1.0.0"
 #define PLUGIN_AUTHOR  "iceeedR"
 
-// Namespace for the native leaderboard and player stats in RAM
-// Notice EXP_MAP_END: both automatically reset on map change with zero manual cleanup!
-new const RANK_NS[]  = "map_deaths_top15";
-new const STATS_NS[] = "map_player_stats";
+// Single namespace for both native leaderboard and auxiliary player stats in RAM
+// EXP_MAP_END automatically clears entries on map change with zero manual cleanup
+new const TOP15_NS[] = "map_deaths_top15";
 
-// Array indices for stats_summary
-enum
+enum _:PlayerStats
 {
 	STAT_KILLS = 0,
 	STAT_DEATHS,
@@ -23,16 +21,13 @@ public plugin_init()
 {
 	register_plugin(PLUGIN_NAME, PLUGIN_VERSION, PLUGIN_AUTHOR);
 
-	// Client chat commands to open the MOTD
 	register_clcmd("say /top15", "CmdShowTop15");
 	register_clcmd("say /deaths", "CmdShowTop15");
 	register_clcmd("say_team /top15", "CmdShowTop15");
 
-	// Server console and admin commands
 	register_concmd("amx_top15", "CmdShowTop15Server", ADMIN_ALL, "Display Top 15 Map Deaths Ranking");
 	register_srvcmd("amx_top15_mock", "CmdPopulateMock", -1, "Regenerate mock ranking data in RAM");
 
-	// Populate mock player stats into MemStore RAM
 	PopulateMockData();
 
 	server_print("==================================================");
@@ -44,10 +39,6 @@ public plugin_init()
 	server_print("==================================================");
 }
 
-// --------------------------------------------------
-// MOCK DATA GENERATOR
-// Demonstrates storing native sorted leaderboards + extra arrays in RAM
-// --------------------------------------------------
 public CmdPopulateMock()
 {
 	PopulateMockData();
@@ -57,11 +48,9 @@ public CmdPopulateMock()
 
 PopulateMockData()
 {
-	// Clear previous entries in RAM
-	mem_rank_clear(RANK_NS);
-	mem_clear_namespace(STATS_NS);
+	mem_rank_clear(TOP15_NS);
+	mem_clear_namespace(TOP15_NS);
 
-	// 20 Mock players (top 15 will be displayed, remaining 5 illustrate truncation)
 	new const mockNames[][] = {
 		"coldzera", "FalleN", "fer", "TACO", "fnx",
 		"s1mple", "ZywOo", "NiKo", "device", "ropz",
@@ -70,7 +59,6 @@ PopulateMockData()
 	};
 
 	new const mockStats[][] = {
-		// Kills, Deaths, KnifeDeaths
 		{ 35, 45, 4 }, // coldzera
 		{ 28, 42, 6 }, // FalleN
 		{ 30, 39, 2 }, // fer
@@ -97,27 +85,22 @@ PopulateMockData()
 	{
 		new deaths = mockStats[i][STAT_DEATHS];
 
-		// 1. Store in the native Sorted Rank Leaderboard (sorted by deaths DESC)
-		// EXP_MAP_END ensures zero manual cleanup needed when map changes
-		mem_rank_set(RANK_NS, mockNames[i], deaths, EXP_MAP_END);
+		// 1. Store in native sorted leaderboard under the single namespace
+		mem_rank_set(TOP15_NS, mockNames[i], deaths, EXP_MAP_END);
 
-		// 2. Store detailed player stats array in RAM under the player name
-		new pData[3];
+		// 2. Store detailed player stats array under the same namespace and key
+		new pData[PlayerStats];
 		pData[STAT_KILLS]        = mockStats[i][STAT_KILLS];
 		pData[STAT_DEATHS]       = mockStats[i][STAT_DEATHS];
 		pData[STAT_KNIFE_DEATHS] = mockStats[i][STAT_KNIFE_DEATHS];
 
-		mem_set_array(STATS_NS, mockNames[i], pData, sizeof(pData), EXP_MAP_END);
+		mem_set_array(TOP15_NS, mockNames[i], pData, sizeof(pData), EXP_MAP_END);
 	}
 }
 
-// --------------------------------------------------
-// MOTD BUILDER
-// Reads top 15 from native ZSET and combines with RAM arrays
-// --------------------------------------------------
 BuildTop15Motd(motdBuffer[], maxlen)
 {
-	new totalCount = mem_rank_get_count(RANK_NS);
+	new totalCount = mem_rank_get_count(TOP15_NS);
 	new limit = (totalCount > 15) ? 15 : totalCount;
 
 	new currentMap[64];
@@ -133,20 +116,18 @@ BuildTop15Motd(motdBuffer[], maxlen)
 
 	new playerName[32];
 	new deaths = 0;
-	new pData[3];
+	new pData[PlayerStats];
 	new copied = 0;
 
 	for (new rankPos = 1; rankPos <= limit; rankPos++)
 	{
-		// Query top ranks natively in descending order (highest deaths first)
-		if (!mem_rank_get_top(RANK_NS, rankPos, playerName, charsmax(playerName), deaths, RANK_DESC))
+		if (!mem_rank_get_top(TOP15_NS, rankPos, playerName, charsmax(playerName), deaths, RANK_DESC))
 		{
 			break;
 		}
 
-		// Retrieve associated stats array from RAM
 		new kills = 0, knifeDeaths = 0;
-		if (mem_get_array(STATS_NS, playerName, pData, sizeof(pData), copied) && copied == 3)
+		if (mem_get_array(TOP15_NS, playerName, pData, sizeof(pData), copied) && copied == PlayerStats)
 		{
 			kills = pData[STAT_KILLS];
 			knifeDeaths = pData[STAT_KNIFE_DEATHS];
@@ -163,15 +144,10 @@ BuildTop15Motd(motdBuffer[], maxlen)
 	len += formatex(motdBuffer[len], maxlen - len, "==========================================================^n");
 }
 
-// --------------------------------------------------
-// COMMAND HANDLERS
-// --------------------------------------------------
 public CmdShowTop15(id)
 {
 	new motd[2048];
 	BuildTop15Motd(motd, charsmax(motd));
-
-	// Display plain-text MOTD popup to player
 	show_motd(id, motd, "Top 15 Map Deaths Ranking");
 	return PLUGIN_HANDLED;
 }
@@ -181,7 +157,7 @@ public CmdShowTop15Server(id, level, cid)
 	new motd[2048];
 	BuildTop15Motd(motd, charsmax(motd));
 
-	if (id == 0) // Server console
+	if (id == 0)
 	{
 		server_print("^n%s", motd);
 	}

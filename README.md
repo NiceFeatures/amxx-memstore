@@ -16,12 +16,15 @@ Unlike `nVault` (which incurs disk I/O latency) or `localinfo` (which is severel
 
 - **RAM-Only Persistence**: Survives map changes (`changelevel`) with zero disk I/O.
 - **Multiple Data Types**: Native support for Integers (`cell`), Floats (`Float:`), Strings (`string`), and Arrays (`array[]`).
+- **Dynamic Arrays & Schema Validation**: `mem_get_array()` provides an optional `&copied_size` output parameter returning the exact count of cells copied. Ideal for variable-sized lists (inventories, weapon loadouts) and struct-size schema validation.
+- **Unified Single-Namespace Architecture**: Each namespace independently maintains both a Key-Value table and a Sorted Rank Leaderboard. Composite arrays and leaderboard ranks can share the exact same namespace and entity key (`authid`) without collision.
 - **Native Leaderboard & Ranking Engine (ZSET)**:
   - In-RAM sorted sets with instant score lookup (`mem_rank_set`, `mem_rank_get_top`, `mem_rank_get_pos`).
   - Supports descending order (`RANK_DESC`) for kills/points and ascending order (`RANK_ASC`) for speedruns/race timers.
   - Deterministic tie-breaking for equal scores.
 - **Zero-Handle Key Enumeration**:
-  - `mem_get_key_at(namespace, index, dest, maxlen)` and `mem_get_namespace_count(namespace)`.
+  - Index-based key lookup: `mem_get_key_at(namespace, index, dest, maxlen)` and `mem_get_namespace_count(namespace)`.
+  - Public callback iteration: `mem_iterate_keys(namespace, "MyCallback")`.
   - Iterate through keys in a namespace without allocating or tracking Pawn handles.
 - **Namespace Sandboxing**: Multiple plugins can safely coexist without key name collisions.
 - **Flexible Expiration Policies**:
@@ -60,10 +63,12 @@ addons/
         ├── include/
         │   └── memstore.inc
         ├── test_memstore.sma        (Unit test suite & benchmark runner)
-        └── example_top15.sma        (Example Top 15 stats plugin with MOTD)
+        ├── example_top15.sma        (Top 15 deaths ranking with MOTD)
+        ├── example_mapstats.sma     (Full map stats & intermission MOTD via ReAPI)
+        └── example_loadout.sma      (Dynamic loadout & copied_size showcase)
 ```
 
-Enable the module in `addons/amxmodx/configs/modules.ini`:
+Enable the module in `addons/amxmodx/configs/modules.ini` (optional, as `#pragma loadlib` autoloads automatically):
 ```ini
 memstore
 ```
@@ -72,60 +77,92 @@ memstore
 
 ## 💡 Pawn Usage Examples
 
-### Example 1: Basic Cross-Map RAM Persistence
+### Example 1: Dynamic Arrays & `copied_size` Validation
 ```pawn
 #include <amxmodx>
 #include <memstore>
 
-public client_putinserver(id)
+#define MAX_LOADOUT_SLOTS 10
+
+public SavePlayerLoadout(id)
 {
-    new authid[35];
+    new authid[MAX_AUTHID_LENGTH];
     get_user_authid(id, authid, charsmax(authid));
 
-    // Store integer to survive across 2 map changes
-    mem_set_int("session_scores", authid, 100, EXP_MAP_COUNT, 2);
+    // Player currently has 3 active items
+    new activeGear[3] = { CSW_AK47, CSW_DEAGLE, CSW_FLASHBANG };
 
-    // Store array in RAM across map changes
-    new gear[3] = { CSW_AK47, CSW_DEAGLE, CSW_FLASHBANG };
-    mem_set_array("player_gear", authid, gear, sizeof(gear), EXP_PERSISTENT);
+    // Save only the 3 active items (variable-length array in RAM)
+    mem_set_array("player_gear", authid, activeGear, sizeof(activeGear), EXP_MAP_COUNT, 2);
 }
 
-public OnNewMap()
+public RestorePlayerLoadout(id)
 {
-    new authid[35];
-    get_user_authid(1, authid, charsmax(authid));
+    new authid[MAX_AUTHID_LENGTH];
+    get_user_authid(id, authid, charsmax(authid));
 
-    new score = 0;
-    if (mem_get_int("session_scores", authid, score))
+    new gearBuffer[MAX_LOADOUT_SLOTS];
+    new itemsRestored = 0;
+
+    // 'itemsRestored' receives the exact number of cells copied (here: 3)
+    if (mem_get_array("player_gear", authid, gearBuffer, sizeof(gearBuffer), itemsRestored))
     {
-        server_print("[MemStore] Restored previous map score from RAM: %d", score);
+        server_print("[MemStore] Restored %d active items for %s:", itemsRestored, authid);
+
+        // Iterate safely only over the restored elements without reading garbage
+        for (new i = 0; i < itemsRestored; i++)
+        {
+            server_print("  - Item #%d: CSW ID %d", i + 1, gearBuffer[i]);
+        }
     }
 }
 ```
 
-### Example 2: In-RAM Map Top 15 Leaderboard
+### Example 2: Unified Namespace Leaderboard + Composite Record
 ```pawn
 #include <amxmodx>
 #include <memstore>
 
-public OnPlayerKilled(victim, killer)
+new const MAP_STATS_NS[] = "mapstats";
+
+enum _:PlayerStats
 {
-    new killerName[32];
-    get_user_name(killer, killerName, charsmax(killerName));
+    STAT_KILLS = 0,
+    STAT_DEATHS,
+    STAT_NAME[MAX_NAME_LENGTH] // Embedded string in the cell array
+};
 
-    new currentKills = 0;
-    mem_rank_get_score("map_kills", killerName, currentKills);
+public SavePlayerSession(id)
+{
+    new authid[MAX_AUTHID_LENGTH];
+    get_user_authid(id, authid, charsmax(authid));
 
-    // Automatically ranked in RAM; EXP_MAP_END auto-clears on map change
-    mem_rank_set("map_kills", killerName, currentKills + 1, EXP_MAP_END);
+    new pData[PlayerStats];
+    pData[STAT_KILLS]  = get_user_frags(id);
+    pData[STAT_DEATHS] = get_user_deaths(id);
+    get_user_name(id, pData[STAT_NAME], charsmax(pData[][STAT_NAME]));
+
+    // 1. Store full composite record (stats + name) in Key-Value store
+    mem_set_array(MAP_STATS_NS, authid, pData, sizeof(pData), EXP_MAP_END);
+
+    // 2. Rank player by kills under the EXACT SAME namespace
+    mem_rank_set(MAP_STATS_NS, authid, pData[STAT_KILLS], EXP_MAP_END);
 }
 
 public ShowTopLeader(id)
 {
-    new leaderName[32], topKills = 0;
-    if (mem_rank_get_top("map_kills", 1, leaderName, charsmax(leaderName), topKills, RANK_DESC))
+    new topAuth[MAX_AUTHID_LENGTH], topKills = 0;
+
+    // Fetch #1 from sorted leaderboard
+    if (mem_rank_get_top(MAP_STATS_NS, 1, topAuth, charsmax(topAuth), topKills, RANK_DESC))
     {
-        client_print(id, print_chat, "[MemStore] Current 1st Place: %s with %d kills!", leaderName, topKills);
+        // Retrieve full record and nickname in a single call without secondary lookups
+        new pData[PlayerStats], copied = 0;
+        if (mem_get_array(MAP_STATS_NS, topAuth, pData, sizeof(pData), copied) && copied == PlayerStats)
+        {
+            client_print(id, print_chat, "[MemStore] #1: %s (%d Kills, %d Deaths)",
+                pData[STAT_NAME], pData[STAT_KILLS], pData[STAT_DEATHS]);
+        }
     }
 }
 ```
