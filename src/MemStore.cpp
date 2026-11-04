@@ -23,6 +23,19 @@ const char *GetTypeName(EntryType type)
 	}
 }
 
+static size_t GetPayloadBytes(const StoreEntry &entry)
+{
+	if (entry.type == EntryType::String)
+	{
+		return entry.stringValue.length();
+	}
+	if (entry.type == EntryType::Array)
+	{
+		return entry.arrayValue.size() * sizeof(cell);
+	}
+	return 0;
+}
+
 // --------------------------------------------------
 // MEMSTORE MANAGER IMPLEMENTATION
 // --------------------------------------------------
@@ -151,16 +164,8 @@ bool MemStoreManager::SetInt(const std::string &ns, const std::string &key, cell
 	StoreEntry &entry = m_Namespaces[ns][key];
 
 	// Adjust memory tracking if old entry held dynamic payload
-	if (entry.type == EntryType::String)
-	{
-		size_t bytes = entry.stringValue.capacity();
-		m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
-	}
-	else if (entry.type == EntryType::Array)
-	{
-		size_t bytes = entry.arrayValue.capacity() * sizeof(cell);
-		m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
-	}
+	size_t oldBytes = GetPayloadBytes(entry);
+	m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= oldBytes) ? (m_ApproxMemoryUsed - oldBytes) : 0;
 
 	entry.type = EntryType::Int;
 	entry.cellValue = val;
@@ -184,16 +189,8 @@ bool MemStoreManager::SetFloat(const std::string &ns, const std::string &key, fl
 
 	StoreEntry &entry = m_Namespaces[ns][key];
 
-	if (entry.type == EntryType::String)
-	{
-		size_t bytes = entry.stringValue.capacity();
-		m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
-	}
-	else if (entry.type == EntryType::Array)
-	{
-		size_t bytes = entry.arrayValue.capacity() * sizeof(cell);
-		m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
-	}
+	size_t oldBytes = GetPayloadBytes(entry);
+	m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= oldBytes) ? (m_ApproxMemoryUsed - oldBytes) : 0;
 
 	entry.type = EntryType::Float;
 	entry.cellValue = 0;
@@ -225,28 +222,18 @@ bool MemStoreManager::SetString(const std::string &ns, const std::string &key, c
 		stored.resize(m_MaxStringLength);
 	}
 
+	StoreEntry &entry = m_Namespaces[ns][key];
+	size_t oldBytes = GetPayloadBytes(entry);
 	size_t newBytes = stored.length();
-	if (!CheckMemoryLimit(newBytes))
+
+	if (m_ApproxMemoryUsed + newBytes - oldBytes > m_MaxMemoryBytes)
 	{
 		MF_Log("ERROR: Global memory quota exceeded (%u MB). String insertion rejected.",
 			static_cast<unsigned int>(m_MaxMemoryBytes / (1024 * 1024)));
 		return false;
 	}
 
-	StoreEntry &entry = m_Namespaces[ns][key];
-
-	// Adjust memory tracking
-	if (entry.type == EntryType::String)
-	{
-		size_t oldBytes = entry.stringValue.capacity();
-		m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= oldBytes) ? (m_ApproxMemoryUsed - oldBytes) : 0;
-	}
-	else if (entry.type == EntryType::Array)
-	{
-		size_t oldBytes = entry.arrayValue.capacity() * sizeof(cell);
-		m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= oldBytes) ? (m_ApproxMemoryUsed - oldBytes) : 0;
-	}
-
+	m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= oldBytes) ? (m_ApproxMemoryUsed - oldBytes) : 0;
 	m_ApproxMemoryUsed += newBytes;
 
 	entry.type = EntryType::String;
@@ -271,26 +258,17 @@ bool MemStoreManager::SetArray(const std::string &ns, const std::string &key, co
 	size_t clampedSize = std::min(size, m_MaxArraySize);
 	size_t newBytes = clampedSize * sizeof(cell);
 
-	if (!CheckMemoryLimit(newBytes))
+	StoreEntry &entry = m_Namespaces[ns][key];
+	size_t oldBytes = GetPayloadBytes(entry);
+
+	if (m_ApproxMemoryUsed + newBytes - oldBytes > m_MaxMemoryBytes)
 	{
 		MF_Log("ERROR: Global memory quota exceeded (%u MB). Array insertion rejected.",
 			static_cast<unsigned int>(m_MaxMemoryBytes / (1024 * 1024)));
 		return false;
 	}
 
-	StoreEntry &entry = m_Namespaces[ns][key];
-
-	if (entry.type == EntryType::String)
-	{
-		size_t oldBytes = entry.stringValue.capacity();
-		m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= oldBytes) ? (m_ApproxMemoryUsed - oldBytes) : 0;
-	}
-	else if (entry.type == EntryType::Array)
-	{
-		size_t oldBytes = entry.arrayValue.capacity() * sizeof(cell);
-		m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= oldBytes) ? (m_ApproxMemoryUsed - oldBytes) : 0;
-	}
-
+	m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= oldBytes) ? (m_ApproxMemoryUsed - oldBytes) : 0;
 	m_ApproxMemoryUsed += newBytes;
 
 	entry.type = EntryType::Array;
@@ -421,7 +399,7 @@ bool MemStoreManager::GetString(const std::string &ns, const std::string &key, s
 	auto now = std::chrono::steady_clock::now();
 	if (keyIt->second.IsExpired(now))
 	{
-		size_t bytes = keyIt->second.stringValue.capacity();
+		size_t bytes = GetPayloadBytes(keyIt->second);
 		m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
 
 		nsIt->second.erase(keyIt);
@@ -468,7 +446,7 @@ bool MemStoreManager::GetArray(const std::string &ns, const std::string &key, ce
 	auto now = std::chrono::steady_clock::now();
 	if (keyIt->second.IsExpired(now))
 	{
-		size_t bytes = keyIt->second.arrayValue.capacity() * sizeof(cell);
+		size_t bytes = GetPayloadBytes(keyIt->second);
 		m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
 
 		nsIt->second.erase(keyIt);
@@ -514,7 +492,7 @@ size_t MemStoreManager::GetArraySize(const std::string &ns, const std::string &k
 	auto now = std::chrono::steady_clock::now();
 	if (keyIt->second.IsExpired(now))
 	{
-		size_t bytes = keyIt->second.arrayValue.capacity() * sizeof(cell);
+		size_t bytes = GetPayloadBytes(keyIt->second);
 		m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
 
 		nsIt->second.erase(keyIt);
@@ -609,16 +587,8 @@ bool MemStoreManager::DeleteKey(const std::string &ns, const std::string &key)
 		return false;
 	}
 
-	if (keyIt->second.type == EntryType::String)
-	{
-		size_t bytes = keyIt->second.stringValue.capacity();
-		m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
-	}
-	else if (keyIt->second.type == EntryType::Array)
-	{
-		size_t bytes = keyIt->second.arrayValue.capacity() * sizeof(cell);
-		m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
-	}
+	size_t bytes = GetPayloadBytes(keyIt->second);
+	m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
 
 	nsIt->second.erase(keyIt);
 	InvalidateKeyCache(ns);
@@ -643,16 +613,8 @@ bool MemStoreManager::ClearNamespace(const std::string &ns)
 
 	for (const auto &pair : nsIt->second)
 	{
-		if (pair.second.type == EntryType::String)
-		{
-			size_t bytes = pair.second.stringValue.capacity();
-			m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
-		}
-		else if (pair.second.type == EntryType::Array)
-		{
-			size_t bytes = pair.second.arrayValue.capacity() * sizeof(cell);
-			m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
-		}
+		size_t bytes = GetPayloadBytes(pair.second);
+		m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
 	}
 
 	m_Namespaces.erase(nsIt);
@@ -767,8 +729,20 @@ bool MemStoreManager::GetKeyAt(const std::string &ns, size_t index, std::string 
 
 	if (index < cache.keys.size())
 	{
-		keyOut = cache.keys[index];
-		return true;
+		if (KeyExists(ns, cache.keys[index]))
+		{
+			keyOut = cache.keys[index];
+			return true;
+		}
+
+		// Cache is stale due to key expiration: rebuild
+		cache.keys = GetActiveKeys(ns);
+		cache.valid = true;
+		if (index < cache.keys.size())
+		{
+			keyOut = cache.keys[index];
+			return true;
+		}
 	}
 
 	return false;
@@ -1041,6 +1015,135 @@ bool MemStoreManager::RankClear(const std::string &ns)
 	return true;
 }
 
+bool MemStoreManager::RankInc(const std::string &ns, const std::string &key, cell delta, cell &newScore, ExpirePolicy policy, int32_t extra)
+{
+	auto now = std::chrono::steady_clock::now();
+	auto nsIt = m_Ranks.find(ns);
+	if (nsIt != m_Ranks.end())
+	{
+		auto keyIt = nsIt->second.find(key);
+		if (keyIt != nsIt->second.end())
+		{
+			if (keyIt->second.IsExpired(now))
+			{
+				keyIt->second.score = delta;
+				keyIt->second.sequence = ++m_RankSequenceCounter;
+				ApplyRankExpiration(keyIt->second, policy, extra);
+				newScore = delta;
+				return true;
+			}
+			keyIt->second.score += delta;
+			keyIt->second.sequence = ++m_RankSequenceCounter;
+			if (policy != ExpirePolicy::Persistent || extra != 0)
+			{
+				ApplyRankExpiration(keyIt->second, policy, extra);
+			}
+			newScore = keyIt->second.score;
+			return true;
+		}
+	}
+
+	if (!RankSet(ns, key, delta, policy, extra))
+	{
+		return false;
+	}
+	newScore = delta;
+	return true;
+}
+
+size_t MemStoreManager::RankGetRange(const std::string &ns, int32_t startPos, size_t count, std::vector<std::pair<std::string, cell>> &resultsOut, RankOrder order)
+{
+	resultsOut.clear();
+	if (startPos < 1 || count == 0)
+	{
+		return 0;
+	}
+
+	auto nsIt = m_Ranks.find(ns);
+	if (nsIt == m_Ranks.end())
+	{
+		return 0;
+	}
+
+	auto now = std::chrono::steady_clock::now();
+	std::vector<std::pair<std::string, RankEntry>> activeEntries;
+	activeEntries.reserve(nsIt->second.size());
+
+	for (auto it = nsIt->second.begin(); it != nsIt->second.end(); )
+	{
+		if (it->second.IsExpired(now))
+		{
+			it = nsIt->second.erase(it);
+		}
+		else
+		{
+			activeEntries.emplace_back(it->first, it->second);
+			++it;
+		}
+	}
+
+	if (nsIt->second.empty())
+	{
+		m_Ranks.erase(nsIt);
+		return 0;
+	}
+
+	size_t startIndex = static_cast<size_t>(startPos - 1);
+	if (startIndex >= activeEntries.size())
+	{
+		return 0;
+	}
+
+	size_t endIndex = std::min(startIndex + count, activeEntries.size());
+
+	if (order == RankOrder::Desc)
+	{
+		auto compDesc = [](const std::pair<std::string, RankEntry> &a, const std::pair<std::string, RankEntry> &b) {
+			if (a.second.score != b.second.score)
+				return a.second.score > b.second.score;
+			return a.second.sequence < b.second.sequence;
+		};
+		if (endIndex < activeEntries.size())
+		{
+			std::partial_sort(activeEntries.begin(), activeEntries.begin() + endIndex, activeEntries.end(), compDesc);
+		}
+		else
+		{
+			std::sort(activeEntries.begin(), activeEntries.end(), compDesc);
+		}
+	}
+	else
+	{
+		auto compAsc = [](const std::pair<std::string, RankEntry> &a, const std::pair<std::string, RankEntry> &b) {
+			if (a.second.score != b.second.score)
+				return a.second.score < b.second.score;
+			return a.second.sequence < b.second.sequence;
+		};
+		if (endIndex < activeEntries.size())
+		{
+			std::partial_sort(activeEntries.begin(), activeEntries.begin() + endIndex, activeEntries.end(), compAsc);
+		}
+		else
+		{
+			std::sort(activeEntries.begin(), activeEntries.end(), compAsc);
+		}
+	}
+
+	resultsOut.reserve(endIndex - startIndex);
+	for (size_t i = startIndex; i < endIndex; ++i)
+	{
+		resultsOut.emplace_back(activeEntries[i].first, activeEntries[i].second.score);
+	}
+
+	return resultsOut.size();
+}
+
+bool MemStoreManager::RankExists(const std::string &ns, const std::string &key)
+{
+	cell dummy = 0;
+	return RankGetScore(ns, key, dummy);
+}
+
 // --------------------------------------------------
 // LIFECYCLE HOOKS
 // --------------------------------------------------
@@ -1059,16 +1162,8 @@ void MemStoreManager::SweepMapEnd()
 
 			if (entry.policy == ExpirePolicy::MapEnd)
 			{
-				if (entry.type == EntryType::String)
-				{
-					size_t bytes = entry.stringValue.capacity();
-					m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
-				}
-				else if (entry.type == EntryType::Array)
-				{
-					size_t bytes = entry.arrayValue.capacity() * sizeof(cell);
-					m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
-				}
+				size_t bytes = GetPayloadBytes(entry);
+				m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
 				keyIt = keyMap.erase(keyIt);
 			}
 			else if (entry.policy == ExpirePolicy::MapCount)
@@ -1076,16 +1171,8 @@ void MemStoreManager::SweepMapEnd()
 				--entry.mapCounter;
 				if (entry.mapCounter <= 0)
 				{
-					if (entry.type == EntryType::String)
-					{
-						size_t bytes = entry.stringValue.capacity();
-						m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
-					}
-					else if (entry.type == EntryType::Array)
-					{
-						size_t bytes = entry.arrayValue.capacity() * sizeof(cell);
-						m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
-					}
+					size_t bytes = GetPayloadBytes(entry);
+					m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
 					keyIt = keyMap.erase(keyIt);
 				}
 				else
@@ -1097,16 +1184,8 @@ void MemStoreManager::SweepMapEnd()
 			{
 				if (now >= entry.expireTime)
 				{
-					if (entry.type == EntryType::String)
-					{
-						size_t bytes = entry.stringValue.capacity();
-						m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
-					}
-					else if (entry.type == EntryType::Array)
-					{
-						size_t bytes = entry.arrayValue.capacity() * sizeof(cell);
-						m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
-					}
+					size_t bytes = GetPayloadBytes(entry);
+					m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= bytes) ? (m_ApproxMemoryUsed - bytes) : 0;
 					keyIt = keyMap.erase(keyIt);
 				}
 				else
@@ -1194,4 +1273,136 @@ void MemStoreManager::ClearAll()
 	m_KeyCaches.clear();
 	m_ApproxMemoryUsed = 0;
 	m_RankSequenceCounter = 0;
+}
+
+bool MemStoreManager::IncInt(const std::string &ns, const std::string &key, cell delta, cell &newVal, ExpirePolicy policy, int32_t extra)
+{
+	auto now = std::chrono::steady_clock::now();
+	auto nsIt = m_Namespaces.find(ns);
+	if (nsIt != m_Namespaces.end())
+	{
+		auto keyIt = nsIt->second.find(key);
+		if (keyIt != nsIt->second.end())
+		{
+			if (keyIt->second.IsExpired(now))
+			{
+				size_t oldBytes = GetPayloadBytes(keyIt->second);
+				m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= oldBytes) ? (m_ApproxMemoryUsed - oldBytes) : 0;
+				keyIt->second.type = EntryType::Int;
+				keyIt->second.cellValue = delta;
+				keyIt->second.floatValue = 0.0f;
+				keyIt->second.stringValue.clear();
+				keyIt->second.arrayValue.clear();
+				ApplyExpiration(keyIt->second, policy, extra);
+				newVal = delta;
+				InvalidateKeyCache(ns);
+				return true;
+			}
+			if (keyIt->second.type != EntryType::Int)
+			{
+				return false;
+			}
+			keyIt->second.cellValue += delta;
+			newVal = keyIt->second.cellValue;
+			if (policy != ExpirePolicy::Persistent || extra != 0)
+			{
+				ApplyExpiration(keyIt->second, policy, extra);
+			}
+			return true;
+		}
+	}
+
+	if (!SetInt(ns, key, delta, policy, extra))
+	{
+		return false;
+	}
+	newVal = delta;
+	return true;
+}
+
+bool MemStoreManager::IncFloat(const std::string &ns, const std::string &key, float delta, float &newVal, ExpirePolicy policy, int32_t extra)
+{
+	auto now = std::chrono::steady_clock::now();
+	auto nsIt = m_Namespaces.find(ns);
+	if (nsIt != m_Namespaces.end())
+	{
+		auto keyIt = nsIt->second.find(key);
+		if (keyIt != nsIt->second.end())
+		{
+			if (keyIt->second.IsExpired(now))
+			{
+				size_t oldBytes = GetPayloadBytes(keyIt->second);
+				m_ApproxMemoryUsed = (m_ApproxMemoryUsed >= oldBytes) ? (m_ApproxMemoryUsed - oldBytes) : 0;
+				keyIt->second.type = EntryType::Float;
+				keyIt->second.cellValue = 0;
+				keyIt->second.floatValue = delta;
+				keyIt->second.stringValue.clear();
+				keyIt->second.arrayValue.clear();
+				ApplyExpiration(keyIt->second, policy, extra);
+				newVal = delta;
+				InvalidateKeyCache(ns);
+				return true;
+			}
+			if (keyIt->second.type != EntryType::Float)
+			{
+				return false;
+			}
+			keyIt->second.floatValue += delta;
+			newVal = keyIt->second.floatValue;
+			if (policy != ExpirePolicy::Persistent || extra != 0)
+			{
+				ApplyExpiration(keyIt->second, policy, extra);
+			}
+			return true;
+		}
+	}
+
+	if (!SetFloat(ns, key, delta, policy, extra))
+	{
+		return false;
+	}
+	newVal = delta;
+	return true;
+}
+
+int32_t MemStoreManager::GetTTL(const std::string &ns, const std::string &key)
+{
+	auto nsIt = m_Namespaces.find(ns);
+	if (nsIt == m_Namespaces.end())
+	{
+		return -2;
+	}
+
+	auto keyIt = nsIt->second.find(key);
+	if (keyIt == nsIt->second.end())
+	{
+		return -2;
+	}
+
+	auto now = std::chrono::steady_clock::now();
+	if (keyIt->second.IsExpired(now))
+	{
+		return -2;
+	}
+
+	if (keyIt->second.policy == ExpirePolicy::TTL)
+	{
+		auto diff = std::chrono::duration_cast<std::chrono::seconds>(keyIt->second.expireTime - now).count();
+		return (diff > 0) ? static_cast<int32_t>(diff) : 0;
+	}
+
+	return -1;
+}
+
+void MemStoreManager::GetMemoryStats(size_t &usedBytes, size_t &maxBytes, size_t &nsCount, size_t &rankNsCount) const
+{
+	usedBytes = m_ApproxMemoryUsed;
+	maxBytes = m_MaxMemoryBytes;
+	nsCount = m_Namespaces.size();
+	rankNsCount = m_Ranks.size();
+}
+
+void MemStoreManager::FlushAll()
+{
+	ClearAll();
 }

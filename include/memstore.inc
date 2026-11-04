@@ -10,6 +10,9 @@
 #endif
 #define _memstore_included
 
+#define MEMSTORE_VERSION     "1.3.0"
+#define MEMSTORE_VERSION_INT 10300
+
 #if !defined _float_included
 	#include <float>
 #endif
@@ -348,3 +351,102 @@ native bool:mem_rank_clear(const namespace[]);
  * @return                 true on success.
  */
 native mem_set_limits(max_keys_per_ns = 5000, max_array_size = 4096, max_string_len = 4096, max_namespaces = 200, max_memory_mb = 64);
+
+/**
+ * Atomically increments an integer cell in memory by a specified delta.
+ * If the key does not exist or has expired, it is initialized to delta.
+ *
+ * @param namespace   Namespace name.
+ * @param key         Key within namespace.
+ * @param delta       Amount to add (can be negative for decrement, default: 1).
+ * @param new_value   Optional variable to receive the resulting value after increment.
+ * @param policy      Expiration policy if key is newly created (default: EXP_PERSISTENT).
+ * @param extra       Extra parameter for expiration policy.
+ *
+ * @return            true on success, false if key limit reached or type mismatch.
+ */
+native bool:mem_inc_int(const namespace[], const key[], delta = 1, &new_value = 0, ExpirePolicy:policy = EXP_PERSISTENT, extra = 0);
+
+/**
+ * Atomically increments a float value in memory by a specified delta.
+ * If the key does not exist or has expired, it is initialized to delta.
+ *
+ * @param namespace   Namespace name.
+ * @param key         Key within namespace.
+ * @param delta       Amount to add (can be negative, default: 1.0).
+ * @param new_value   Optional variable to receive the resulting float value.
+ * @param policy      Expiration policy if key is newly created (default: EXP_PERSISTENT).
+ * @param extra       Extra parameter for expiration policy.
+ *
+ * @return            true on success, false if key limit reached or type mismatch.
+ */
+native bool:mem_inc_float(const namespace[], const key[], Float:delta = 1.0, &Float:new_value = 0.0, ExpirePolicy:policy = EXP_PERSISTENT, extra = 0);
+
+/**
+ * Atomically increments an entity's score in a sorted rank leaderboard.
+ * If the key does not exist or has expired, it is initialized with score delta.
+ *
+ * @param namespace   Rank namespace name.
+ * @param key         Entity/player identifier.
+ * @param delta       Score delta to add (can be negative, default: 1).
+ * @param new_score   Optional variable to receive the resulting score.
+ * @param policy      Expiration policy if newly created (default: EXP_PERSISTENT).
+ * @param extra       Extra parameter for expiration policy.
+ *
+ * @return            true on success, false if limit reached.
+ */
+native bool:mem_rank_inc(const namespace[], const key[], delta = 1, &new_score = 0, ExpirePolicy:policy = EXP_PERSISTENT, extra = 0);
+
+/**
+ * Retrieves the remaining wall-clock Time-To-Live (TTL) in seconds for a key.
+ *
+ * @param namespace   Namespace name.
+ * @param key         Key within namespace.
+ *
+ * @return            Remaining seconds (>= 0),
+ *                    -1 if the key has no wall-clock TTL (e.g. EXP_PERSISTENT, EXP_MAP_END, EXP_MAP_COUNT),
+ *                    -2 if the key does not exist or is expired.
+ */
+native mem_get_ttl(const namespace[], const key[]);
+
+/**
+ * Retrieves a contiguous slice of the leaderboard in a single call into 2D arrays.
+ * Highly optimized for Top 10/15/30 menus and MOTD rendering with zero repeated allocations.
+ *
+ * @param namespace   Rank namespace name.
+ * @param start_pos   1-based starting position (e.g., 1 for Top 1, 16 for next page).
+ * @param count       Number of rank entries to retrieve.
+ * @param keys        2D string array buffer to receive entity keys (e.g. keys[15][32]).
+ * @param scores      Array to receive scores (e.g. scores[15]). Pass 0 to omit.
+ * @param max_items   Capacity of the destination arrays (number of rows).
+ * @param max_key_len Maximum string length for each key row.
+ * @param order       Sort order: RANK_DESC (default) or RANK_ASC.
+ *
+ * @return            Number of entries actually retrieved and written.
+ */
+native mem_rank_get_range(const namespace[], start_pos, count, keys[][], scores[], max_items, max_key_len, RankOrder:order = RANK_DESC);
+
+/**
+ * Checks if an entity exists in a rank leaderboard and has not expired.
+ *
+ * @param namespace   Rank namespace name.
+ * @param key         Entity key to check.
+ *
+ * @return            true if entity exists in rank, false otherwise.
+ */
+native bool:mem_rank_exists(const namespace[], const key[]);
+
+/**
+ * Retrieves global memory usage and namespace statistics.
+ *
+ * @param used_bytes           Variable to receive approximate dynamic bytes allocated.
+ * @param max_bytes            Variable to receive maximum configured RAM quota.
+ * @param namespaces_count     Variable to receive count of active KV namespaces.
+ * @param rank_namespaces_count Variable to receive count of active rank namespaces.
+ */
+native mem_get_memory_stats(&used_bytes = 0, &max_bytes = 0, &namespaces_count = 0, &rank_namespaces_count = 0);
+
+/**
+ * Completely flushes all memory allocations, namespaces, ranks, and caches.
+ */
+native mem_flush_all();

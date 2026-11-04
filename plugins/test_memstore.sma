@@ -2,7 +2,7 @@
 #include <memstore>
 
 #define PLUGIN_NAME    "MemStore Comprehensive Test Suite"
-#define PLUGIN_VERSION "1.0.0"
+#define PLUGIN_VERSION "1.3.0"
 #define PLUGIN_AUTHOR  "iceeedR"
 
 #define LOG_FILENAME   "memstore_bench.log"
@@ -404,6 +404,11 @@ public CmdRunTests()
 	TestNamespaceDeletionLeak();
 	TestKeyIteratorCallback();
 	TestMemoryQuotaGuard();
+	TestAtomicIncrements();
+	TestTTLInspection();
+	TestBatchRanking();
+	TestMemoryDiagnosticsAndFlush();
+	TestStackSafetyOmittedDefaults();
 
 	server_print("--------------------------------------------------");
 	server_print("TOTAL RESULTS: %d PASSED, %d FAILED", g_PassedCount, g_FailedCount);
@@ -749,6 +754,151 @@ TestMemoryQuotaGuard()
 
 	// Restore default 64 MB limits
 	mem_set_limits(5000, 4096, 4096, 200, 64);
+}
+
+TestAtomicIncrements()
+{
+	server_print("[Testing] Atomic Increments (mem_inc_int, mem_inc_float, mem_rank_inc)...");
+	mem_clear_namespace("atomic_ns");
+
+	// 1. mem_inc_int on non-existent key (initializes to delta)
+	new outVal = 0;
+	new bool:ok1 = mem_inc_int("atomic_ns", "kills", 10, outVal);
+	Assert("mem_inc_int init key to 10", ok1 && outVal == 10);
+
+	// 2. mem_inc_int subsequent increment
+	new bool:ok2 = mem_inc_int("atomic_ns", "kills", 5, outVal);
+	Assert("mem_inc_int 10 + 5 = 15", ok2 && outVal == 15);
+
+	// 3. mem_inc_int negative delta (decrement)
+	new bool:ok3 = mem_inc_int("atomic_ns", "kills", -3, outVal);
+	Assert("mem_inc_int 15 - 3 = 12", ok3 && outVal == 12);
+
+	// 4. mem_inc_float
+	new Float:outFloat = 0.0;
+	new bool:fOk1 = mem_inc_float("atomic_ns", "speed", 250.5, outFloat);
+	Assert("mem_inc_float init to 250.5", fOk1 && outFloat == 250.5);
+
+	new bool:fOk2 = mem_inc_float("atomic_ns", "speed", 9.5, outFloat);
+	Assert("mem_inc_float 250.5 + 9.5 = 260.0", fOk2 && outFloat == 260.0);
+
+	// 5. mem_rank_inc (ZINCRBY)
+	mem_rank_clear("atomic_rank");
+	new newScore = 0;
+	new bool:rOk1 = mem_rank_inc("atomic_rank", "PlayerA", 50, newScore);
+	Assert("mem_rank_inc init score to 50", rOk1 && newScore == 50);
+
+	new bool:rOk2 = mem_rank_inc("atomic_rank", "PlayerA", 25, newScore);
+	Assert("mem_rank_inc 50 + 25 = 75", rOk2 && newScore == 75);
+
+	mem_clear_namespace("atomic_ns");
+	mem_rank_clear("atomic_rank");
+}
+
+TestTTLInspection()
+{
+	server_print("[Testing] TTL Inspection (mem_get_ttl)...");
+	mem_clear_namespace("ttl_insp_ns");
+
+	// 1. Non-existent key returns -2
+	new ttlNone = mem_get_ttl("ttl_insp_ns", "ghost");
+	Assert("mem_get_ttl on nonexistent key returns -2", ttlNone == -2);
+
+	// 2. Persistent key returns -1
+	mem_set_int("ttl_insp_ns", "perm", 123, EXP_PERSISTENT);
+	new ttlPerm = mem_get_ttl("ttl_insp_ns", "perm");
+	Assert("mem_get_ttl on EXP_PERSISTENT returns -1", ttlPerm == -1);
+
+	// 3. TTL key returns remaining seconds >= 0
+	mem_set_int("ttl_insp_ns", "temp", 456, EXP_TTL, 60);
+	new ttlTemp = mem_get_ttl("ttl_insp_ns", "temp");
+	Assert("mem_get_ttl on EXP_TTL 60s returns between 1 and 60", ttlTemp > 0 && ttlTemp <= 60);
+
+	mem_clear_namespace("ttl_insp_ns");
+}
+
+TestBatchRanking()
+{
+	server_print("[Testing] Batch Ranking & Existence (mem_rank_get_range, mem_rank_exists)...");
+	mem_rank_clear("batch_rank");
+
+	mem_rank_set("batch_rank", "Alice", 100);
+	mem_rank_set("batch_rank", "Bob", 300);
+	mem_rank_set("batch_rank", "Charlie", 200);
+	mem_rank_set("batch_rank", "David", 50);
+
+	// 1. mem_rank_exists
+	Assert("mem_rank_exists returns true for Alice", mem_rank_exists("batch_rank", "Alice"));
+	Assert("mem_rank_exists returns false for Eve", !mem_rank_exists("batch_rank", "Eve"));
+
+	// 2. mem_rank_get_range in descending order
+	new names[4][32];
+	new scores[4];
+	new count = mem_rank_get_range("batch_rank", 1, 3, names, scores, sizeof(names), charsmax(names[]), RANK_DESC);
+
+	Assert("mem_rank_get_range retrieved 3 items", count == 3);
+	Assert("1st is Bob with 300", equal(names[0], "Bob") && scores[0] == 300);
+	Assert("2nd is Charlie with 200", equal(names[1], "Charlie") && scores[1] == 200);
+	Assert("3rd is Alice with 100", equal(names[2], "Alice") && scores[2] == 100);
+
+	// 3. Ascending order (lowest first)
+	count = mem_rank_get_range("batch_rank", 1, 2, names, scores, sizeof(names), charsmax(names[]), RANK_ASC);
+	Assert("1st lowest is David with 50", count == 2 && equal(names[0], "David") && scores[0] == 50);
+	Assert("2nd lowest is Alice with 100", equal(names[1], "Alice") && scores[1] == 100);
+
+	mem_rank_clear("batch_rank");
+}
+
+TestMemoryDiagnosticsAndFlush()
+{
+	server_print("[Testing] Diagnostics & Global Flush (mem_get_memory_stats, mem_flush_all)...");
+
+	mem_flush_all();
+
+	new usedBytes = 0, maxBytes = 0, nsCount = 0, rankNsCount = 0;
+	mem_get_memory_stats(usedBytes, maxBytes, nsCount, rankNsCount);
+
+	Assert("After flush: namespaces count is 0", nsCount == 0);
+	Assert("After flush: rank namespaces count is 0", rankNsCount == 0);
+	Assert("After flush: usedBytes is 0", usedBytes == 0);
+	Assert("Configured max memory > 0", maxBytes > 0);
+
+	mem_set_string("diag_ns", "key", "Test payload string");
+	mem_rank_set("diag_rank", "Player", 10);
+	mem_get_memory_stats(usedBytes, maxBytes, nsCount, rankNsCount);
+
+	Assert("Memory stats: nsCount is 1", nsCount == 1);
+	Assert("Memory stats: rankNsCount is 1", rankNsCount == 1);
+	Assert("Memory stats: usedBytes tracked correctly", usedBytes > 0);
+
+	mem_flush_all();
+}
+
+TestStackSafetyOmittedDefaults()
+{
+	server_print("[Testing] Stack Safety on Omitted Default Arguments...");
+	mem_clear_namespace("stack_ns");
+
+	mem_set_int("stack_ns", "val", 777);
+
+	// Call mem_get_int omitting default_val
+	new readVal = 0;
+	new bool:gotInt = mem_get_int("stack_ns", "val", readVal);
+	Assert("mem_get_int works when omitting default_val", gotInt && readVal == 777);
+
+	// Call mem_get_float omitting default_val
+	mem_set_float("stack_ns", "fval", 12.34);
+	new Float:readFloat = 0.0;
+	new bool:gotFloat = mem_get_float("stack_ns", "fval", readFloat);
+	Assert("mem_get_float works when omitting default_val", gotFloat && readFloat == 12.34);
+
+	// Call mem_get_string omitting default_val
+	mem_set_string("stack_ns", "sval", "HelloStack");
+	new sBuf[32];
+	new bool:gotStr = mem_get_string("stack_ns", "sval", sBuf, charsmax(sBuf));
+	Assert("mem_get_string works when omitting default_val", gotStr && equal(sBuf, "HelloStack"));
+
+	mem_clear_namespace("stack_ns");
 }
 
 // --------------------------------------------------

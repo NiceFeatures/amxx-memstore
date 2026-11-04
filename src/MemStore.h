@@ -122,12 +122,26 @@ public:
 
 	// Feature A: Native Rank / Leaderboard Engine (Sorted Sets)
 	bool RankSet(const std::string &ns, const std::string &key, cell score, ExpirePolicy policy, int32_t extra);
+	bool RankInc(const std::string &ns, const std::string &key, cell delta, cell &newScore, ExpirePolicy policy, int32_t extra);
 	bool RankGetScore(const std::string &ns, const std::string &key, cell &scoreOut);
 	int32_t RankGetPosition(const std::string &ns, const std::string &key, RankOrder order);
 	bool RankGetTop(const std::string &ns, int32_t rankPos, std::string &keyOut, cell &scoreOut, RankOrder order);
+	size_t RankGetRange(const std::string &ns, int32_t startPos, size_t count, std::vector<std::pair<std::string, cell>> &resultsOut, RankOrder order);
 	size_t RankGetCount(const std::string &ns);
+	bool RankExists(const std::string &ns, const std::string &key);
 	bool RankDelete(const std::string &ns, const std::string &key);
 	bool RankClear(const std::string &ns);
+
+	// Atomic arithmetic
+	bool IncInt(const std::string &ns, const std::string &key, cell delta, cell &newVal, ExpirePolicy policy, int32_t extra);
+	bool IncFloat(const std::string &ns, const std::string &key, float delta, float &newVal, ExpirePolicy policy, int32_t extra);
+
+	// TTL inspection
+	int32_t GetTTL(const std::string &ns, const std::string &key);
+
+	// Diagnostics & Admin
+	void GetMemoryStats(size_t &usedBytes, size_t &maxBytes, size_t &nsCount, size_t &rankNsCount) const;
+	void FlushAll();
 
 	// Lifecycle hooks
 	void SweepMapEnd();

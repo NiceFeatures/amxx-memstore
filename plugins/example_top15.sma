@@ -3,7 +3,7 @@
 #include <memstore>
 
 #define PLUGIN_NAME    "MemStore Example: Top 15 Map Stats"
-#define PLUGIN_VERSION "1.0.0"
+#define PLUGIN_VERSION "1.3.0"
 #define PLUGIN_AUTHOR  "iceeedR"
 
 // Single namespace for both native leaderboard and auxiliary player stats in RAM
@@ -114,20 +114,18 @@ BuildTop15Motd(motdBuffer[], maxlen)
 	len += formatex(motdBuffer[len], maxlen - len, "%-4s %-20s %-8s %-8s %-12s^n", "#", "Player Name", "Deaths", "Kills", "Knife Deaths");
 	len += formatex(motdBuffer[len], maxlen - len, "----------------------------------------------------------^n");
 
-	new playerName[32];
-	new deaths = 0;
+	// High-Performance Batch Retrieval: Fetch entire Top 15 slice in a single call via 2D arrays!
+	new rankNames[15][32];
+	new rankDeaths[15];
+	new fetched = mem_rank_get_range(TOP15_NS, 1, limit, rankNames, rankDeaths, sizeof(rankNames), charsmax(rankNames[]), RANK_DESC);
+
 	new pData[PlayerStats];
 	new copied = 0;
 
-	for (new rankPos = 1; rankPos <= limit; rankPos++)
+	for (new i = 0; i < fetched; i++)
 	{
-		if (!mem_rank_get_top(TOP15_NS, rankPos, playerName, charsmax(playerName), deaths, RANK_DESC))
-		{
-			break;
-		}
-
 		new kills = 0, knifeDeaths = 0;
-		if (mem_get_array(TOP15_NS, playerName, pData, sizeof(pData), copied) && copied == PlayerStats)
+		if (mem_get_array(TOP15_NS, rankNames[i], pData, sizeof(pData), copied) && copied == PlayerStats)
 		{
 			kills = pData[STAT_KILLS];
 			knifeDeaths = pData[STAT_KNIFE_DEATHS];
@@ -135,7 +133,7 @@ BuildTop15Motd(motdBuffer[], maxlen)
 
 		len += formatex(motdBuffer[len], maxlen - len,
 			"%-4d %-20s %-8d %-8d %-12d^n",
-			rankPos, playerName, deaths, kills, knifeDeaths);
+			i + 1, rankNames[i], rankDeaths[i], kills, knifeDeaths);
 	}
 
 	len += formatex(motdBuffer[len], maxlen - len, "==========================================================^n");

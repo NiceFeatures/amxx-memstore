@@ -51,13 +51,19 @@ static cell AMX_NATIVE_CALL amxx_mem_set_int(AMX *amx, cell *params)
 	}
 
 	cell val = params[3];
-	if (!IsValidExpirePolicy(params[4]))
+	unsigned int numParams = (*params) / sizeof(cell);
+
+	ExpirePolicy policy = ExpirePolicy::Persistent;
+	if (numParams >= 4)
 	{
-		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[4]);
-		return 0;
+		if (!IsValidExpirePolicy(params[4]))
+		{
+			MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[4]);
+			return 0;
+		}
+		policy = static_cast<ExpirePolicy>(params[4]);
 	}
-	ExpirePolicy policy = static_cast<ExpirePolicy>(params[4]);
-	int32_t extra = static_cast<int32_t>(params[5]);
+	int32_t extra = (numParams >= 5) ? static_cast<int32_t>(params[5]) : 0;
 
 	return g_MemStore.SetInt(ns, key, val, policy, extra) ? 1 : 0;
 }
@@ -72,7 +78,8 @@ static cell AMX_NATIVE_CALL amxx_mem_get_int(AMX *amx, cell *params)
 	}
 
 	cell *valAddr = MF_GetAmxAddr(amx, params[3]);
-	cell defaultVal = params[4];
+	unsigned int numParams = (*params) / sizeof(cell);
+	cell defaultVal = (numParams >= 4) ? params[4] : 0;
 
 	bool typeMismatch = false;
 	bool found = false;
@@ -108,13 +115,19 @@ static cell AMX_NATIVE_CALL amxx_mem_set_float(AMX *amx, cell *params)
 	}
 
 	float val = amx_ctof(params[3]);
-	if (!IsValidExpirePolicy(params[4]))
+	unsigned int numParams = (*params) / sizeof(cell);
+
+	ExpirePolicy policy = ExpirePolicy::Persistent;
+	if (numParams >= 4)
 	{
-		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[4]);
-		return 0;
+		if (!IsValidExpirePolicy(params[4]))
+		{
+			MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[4]);
+			return 0;
+		}
+		policy = static_cast<ExpirePolicy>(params[4]);
 	}
-	ExpirePolicy policy = static_cast<ExpirePolicy>(params[4]);
-	int32_t extra = static_cast<int32_t>(params[5]);
+	int32_t extra = (numParams >= 5) ? static_cast<int32_t>(params[5]) : 0;
 
 	return g_MemStore.SetFloat(ns, key, val, policy, extra) ? 1 : 0;
 }
@@ -129,7 +142,8 @@ static cell AMX_NATIVE_CALL amxx_mem_get_float(AMX *amx, cell *params)
 	}
 
 	cell *valAddr = MF_GetAmxAddr(amx, params[3]);
-	float defaultVal = amx_ctof(params[4]);
+	unsigned int numParams = (*params) / sizeof(cell);
+	float defaultVal = (numParams >= 4) ? amx_ctof(params[4]) : 0.0f;
 
 	bool typeMismatch = false;
 	bool found = false;
@@ -168,13 +182,18 @@ static cell AMX_NATIVE_CALL amxx_mem_set_string(AMX *amx, cell *params)
 	char *valStr = MF_GetAmxString(amx, params[3], 2, &len);
 	std::string val = (valStr != nullptr) ? valStr : "";
 
-	if (!IsValidExpirePolicy(params[4]))
+	unsigned int numParams = (*params) / sizeof(cell);
+	ExpirePolicy policy = ExpirePolicy::Persistent;
+	if (numParams >= 4)
 	{
-		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[4]);
-		return 0;
+		if (!IsValidExpirePolicy(params[4]))
+		{
+			MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[4]);
+			return 0;
+		}
+		policy = static_cast<ExpirePolicy>(params[4]);
 	}
-	ExpirePolicy policy = static_cast<ExpirePolicy>(params[4]);
-	int32_t extra = static_cast<int32_t>(params[5]);
+	int32_t extra = (numParams >= 5) ? static_cast<int32_t>(params[5]) : 0;
 
 	return g_MemStore.SetString(ns, key, val, policy, extra) ? 1 : 0;
 }
@@ -195,9 +214,17 @@ static cell AMX_NATIVE_CALL amxx_mem_get_string(AMX *amx, cell *params)
 		return 0;
 	}
 
-	int defaultLen = 0;
-	char *defaultStr = MF_GetAmxString(amx, params[5], 2, &defaultLen);
-	std::string def = (defaultStr != nullptr) ? defaultStr : "";
+	unsigned int numParams = (*params) / sizeof(cell);
+	std::string def = "";
+	if (numParams >= 5 && params[5] != 0)
+	{
+		int defaultLen = 0;
+		char *defaultStr = MF_GetAmxString(amx, params[5], 2, &defaultLen);
+		if (defaultStr != nullptr)
+		{
+			def = defaultStr;
+		}
+	}
 
 	bool typeMismatch = false;
 	bool found = false;
@@ -239,13 +266,18 @@ static cell AMX_NATIVE_CALL amxx_mem_set_array(AMX *amx, cell *params)
 		return 0;
 	}
 
-	if (!IsValidExpirePolicy(params[5]))
+	unsigned int numParams = (*params) / sizeof(cell);
+	ExpirePolicy policy = ExpirePolicy::Persistent;
+	if (numParams >= 5)
 	{
-		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[5]);
-		return 0;
+		if (!IsValidExpirePolicy(params[5]))
+		{
+			MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[5]);
+			return 0;
+		}
+		policy = static_cast<ExpirePolicy>(params[5]);
 	}
-	ExpirePolicy policy = static_cast<ExpirePolicy>(params[5]);
-	int32_t extra = static_cast<int32_t>(params[6]);
+	int32_t extra = (numParams >= 6) ? static_cast<int32_t>(params[6]) : 0;
 
 	return g_MemStore.SetArray(ns, key, arrPtr, static_cast<size_t>(size), policy, extra) ? 1 : 0;
 }
@@ -378,7 +410,8 @@ static cell AMX_NATIVE_CALL amxx_mem_set_expire(AMX *amx, cell *params)
 		return 0;
 	}
 	ExpirePolicy policy = static_cast<ExpirePolicy>(params[3]);
-	int32_t extra = static_cast<int32_t>(params[4]);
+	unsigned int numParams = (*params) / sizeof(cell);
+	int32_t extra = (numParams >= 4) ? static_cast<int32_t>(params[4]) : 0;
 
 	return g_MemStore.SetExpire(ns, key, policy, extra) ? 1 : 0;
 }
@@ -490,13 +523,19 @@ static cell AMX_NATIVE_CALL amxx_mem_rank_set(AMX *amx, cell *params)
 	}
 
 	cell score = params[3];
-	if (!IsValidExpirePolicy(params[4]))
+	unsigned int numParams = (*params) / sizeof(cell);
+
+	ExpirePolicy policy = ExpirePolicy::Persistent;
+	if (numParams >= 4)
 	{
-		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[4]);
-		return 0;
+		if (!IsValidExpirePolicy(params[4]))
+		{
+			MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[4]);
+			return 0;
+		}
+		policy = static_cast<ExpirePolicy>(params[4]);
 	}
-	ExpirePolicy policy = static_cast<ExpirePolicy>(params[4]);
-	int32_t extra = static_cast<int32_t>(params[5]);
+	int32_t extra = (numParams >= 5) ? static_cast<int32_t>(params[5]) : 0;
 
 	return g_MemStore.RankSet(ns, key, score, policy, extra) ? 1 : 0;
 }
@@ -535,12 +574,18 @@ static cell AMX_NATIVE_CALL amxx_mem_rank_get_pos(AMX *amx, cell *params)
 		return 0;
 	}
 
-	if (!IsValidRankOrder(params[3]))
+	unsigned int numParams = (*params) / sizeof(cell);
+	RankOrder order = RankOrder::Desc;
+	if (numParams >= 3)
 	{
-		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid RankOrder value: %d", MODULE_LOGTAG, params[3]);
-		return 0;
+		if (!IsValidRankOrder(params[3]))
+		{
+			MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid RankOrder value: %d", MODULE_LOGTAG, params[3]);
+			return 0;
+		}
+		order = static_cast<RankOrder>(params[3]);
 	}
-	RankOrder order = static_cast<RankOrder>(params[3]);
+
 	return static_cast<cell>(g_MemStore.RankGetPosition(ns, key, order));
 }
 
@@ -671,6 +716,253 @@ static cell AMX_NATIVE_CALL amxx_mem_set_limits(AMX *amx, cell *params)
 	return 1;
 }
 
+// native bool:mem_inc_int(const namespace[], const key[], delta = 1, &new_value = 0, ExpirePolicy:policy = EXP_PERSISTENT, extra = 0);
+static cell AMX_NATIVE_CALL amxx_mem_inc_int(AMX *amx, cell *params)
+{
+	std::string ns, key;
+	if (!GetNamespaceAndKey(amx, params[1], params[2], ns, key))
+	{
+		return 0;
+	}
+
+	unsigned int numParams = (*params) / sizeof(cell);
+	cell delta = (numParams >= 3) ? params[3] : 1;
+
+	cell *newValAddr = nullptr;
+	if (numParams >= 4 && params[4] != 0)
+	{
+		newValAddr = MF_GetAmxAddr(amx, params[4]);
+	}
+
+	ExpirePolicy policy = ExpirePolicy::Persistent;
+	if (numParams >= 5)
+	{
+		if (!IsValidExpirePolicy(params[5]))
+		{
+			MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[5]);
+			return 0;
+		}
+		policy = static_cast<ExpirePolicy>(params[5]);
+	}
+	int32_t extra = (numParams >= 6) ? static_cast<int32_t>(params[6]) : 0;
+
+	cell outVal = 0;
+	bool success = g_MemStore.IncInt(ns, key, delta, outVal, policy, extra);
+	if (newValAddr)
+	{
+		*newValAddr = outVal;
+	}
+
+	return success ? 1 : 0;
+}
+
+// native bool:mem_inc_float(const namespace[], const key[], Float:delta = 1.0, &Float:new_value = 0.0, ExpirePolicy:policy = EXP_PERSISTENT, extra = 0);
+static cell AMX_NATIVE_CALL amxx_mem_inc_float(AMX *amx, cell *params)
+{
+	std::string ns, key;
+	if (!GetNamespaceAndKey(amx, params[1], params[2], ns, key))
+	{
+		return 0;
+	}
+
+	unsigned int numParams = (*params) / sizeof(cell);
+	float delta = (numParams >= 3) ? amx_ctof(params[3]) : 1.0f;
+
+	cell *newValAddr = nullptr;
+	if (numParams >= 4 && params[4] != 0)
+	{
+		newValAddr = MF_GetAmxAddr(amx, params[4]);
+	}
+
+	ExpirePolicy policy = ExpirePolicy::Persistent;
+	if (numParams >= 5)
+	{
+		if (!IsValidExpirePolicy(params[5]))
+		{
+			MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[5]);
+			return 0;
+		}
+		policy = static_cast<ExpirePolicy>(params[5]);
+	}
+	int32_t extra = (numParams >= 6) ? static_cast<int32_t>(params[6]) : 0;
+
+	float outVal = 0.0f;
+	bool success = g_MemStore.IncFloat(ns, key, delta, outVal, policy, extra);
+	if (newValAddr)
+	{
+		*newValAddr = amx_ftoc((REAL)outVal);
+	}
+
+	return success ? 1 : 0;
+}
+
+// native bool:mem_rank_inc(const namespace[], const key[], delta = 1, &new_score = 0, ExpirePolicy:policy = EXP_PERSISTENT, extra = 0);
+static cell AMX_NATIVE_CALL amxx_mem_rank_inc(AMX *amx, cell *params)
+{
+	std::string ns, key;
+	if (!GetNamespaceAndKey(amx, params[1], params[2], ns, key))
+	{
+		return 0;
+	}
+
+	unsigned int numParams = (*params) / sizeof(cell);
+	cell delta = (numParams >= 3) ? params[3] : 1;
+
+	cell *newScoreAddr = nullptr;
+	if (numParams >= 4 && params[4] != 0)
+	{
+		newScoreAddr = MF_GetAmxAddr(amx, params[4]);
+	}
+
+	ExpirePolicy policy = ExpirePolicy::Persistent;
+	if (numParams >= 5)
+	{
+		if (!IsValidExpirePolicy(params[5]))
+		{
+			MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid ExpirePolicy value: %d", MODULE_LOGTAG, params[5]);
+			return 0;
+		}
+		policy = static_cast<ExpirePolicy>(params[5]);
+	}
+	int32_t extra = (numParams >= 6) ? static_cast<int32_t>(params[6]) : 0;
+
+	cell outScore = 0;
+	bool success = g_MemStore.RankInc(ns, key, delta, outScore, policy, extra);
+	if (newScoreAddr)
+	{
+		*newScoreAddr = outScore;
+	}
+
+	return success ? 1 : 0;
+}
+
+// native mem_get_ttl(const namespace[], const key[]);
+static cell AMX_NATIVE_CALL amxx_mem_get_ttl(AMX *amx, cell *params)
+{
+	std::string ns, key;
+	if (!GetNamespaceAndKey(amx, params[1], params[2], ns, key))
+	{
+		return -2;
+	}
+
+	return static_cast<cell>(g_MemStore.GetTTL(ns, key));
+}
+
+// native mem_rank_get_range(const namespace[], start_pos, count, keys[][], scores[], max_items, max_key_len, RankOrder:order = RANK_DESC);
+static cell AMX_NATIVE_CALL amxx_mem_rank_get_range(AMX *amx, cell *params)
+{
+	int len = 0;
+	char *nsStr = MF_GetAmxString(amx, params[1], 0, &len);
+	if (!nsStr || len == 0)
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Namespace name cannot be empty!", MODULE_LOGTAG);
+		return 0;
+	}
+
+	cell startPos = params[2];
+	cell count = params[3];
+	if (startPos < 1 || count <= 0)
+	{
+		return 0;
+	}
+
+	cell maxItems = params[6];
+	cell maxKeyLen = params[7];
+	if (maxItems <= 0 || maxKeyLen <= 0)
+	{
+		return 0;
+	}
+
+	unsigned int numParams = (*params) / sizeof(cell);
+	RankOrder order = RankOrder::Desc;
+	if (numParams >= 8)
+	{
+		if (!IsValidRankOrder(params[8]))
+		{
+			MF_LogError(amx, AMX_ERR_NATIVE, "[%s] Invalid RankOrder value: %d", MODULE_LOGTAG, params[8]);
+			return 0;
+		}
+		order = static_cast<RankOrder>(params[8]);
+	}
+
+	size_t fetchCount = std::min(static_cast<size_t>(count), static_cast<size_t>(maxItems));
+	std::vector<std::pair<std::string, cell>> results;
+	size_t retrieved = g_MemStore.RankGetRange(nsStr, startPos, fetchCount, results, order);
+	if (retrieved == 0)
+	{
+		return 0;
+	}
+
+	cell *keysPtr = (params[4] != 0) ? MF_GetAmxAddr(amx, params[4]) : nullptr;
+	cell *scoresPtr = (params[5] != 0) ? MF_GetAmxAddr(amx, params[5]) : nullptr;
+
+	for (size_t i = 0; i < retrieved; ++i)
+	{
+		if (keysPtr)
+		{
+			cell rowAddr = params[4] + keysPtr[i];
+			MF_SetAmxString(amx, rowAddr, results[i].first.c_str(), maxKeyLen);
+		}
+		if (scoresPtr)
+		{
+			scoresPtr[i] = results[i].second;
+		}
+	}
+
+	return static_cast<cell>(retrieved);
+}
+
+// native bool:mem_rank_exists(const namespace[], const key[]);
+static cell AMX_NATIVE_CALL amxx_mem_rank_exists(AMX *amx, cell *params)
+{
+	std::string ns, key;
+	if (!GetNamespaceAndKey(amx, params[1], params[2], ns, key))
+	{
+		return 0;
+	}
+
+	return g_MemStore.RankExists(ns, key) ? 1 : 0;
+}
+
+// native mem_get_memory_stats(&used_bytes = 0, &max_bytes = 0, &namespaces_count = 0, &rank_namespaces_count = 0);
+static cell AMX_NATIVE_CALL amxx_mem_get_memory_stats(AMX *amx, cell *params)
+{
+	unsigned int numParams = (*params) / sizeof(cell);
+
+	size_t usedBytes = 0, maxBytes = 0, nsCount = 0, rankNsCount = 0;
+	g_MemStore.GetMemoryStats(usedBytes, maxBytes, nsCount, rankNsCount);
+
+	if (numParams >= 1 && params[1] != 0)
+	{
+		cell *ptr = MF_GetAmxAddr(amx, params[1]);
+		if (ptr) *ptr = static_cast<cell>(usedBytes);
+	}
+	if (numParams >= 2 && params[2] != 0)
+	{
+		cell *ptr = MF_GetAmxAddr(amx, params[2]);
+		if (ptr) *ptr = static_cast<cell>(maxBytes);
+	}
+	if (numParams >= 3 && params[3] != 0)
+	{
+		cell *ptr = MF_GetAmxAddr(amx, params[3]);
+		if (ptr) *ptr = static_cast<cell>(nsCount);
+	}
+	if (numParams >= 4 && params[4] != 0)
+	{
+		cell *ptr = MF_GetAmxAddr(amx, params[4]);
+		if (ptr) *ptr = static_cast<cell>(rankNsCount);
+	}
+
+	return 1;
+}
+
+// native mem_flush_all();
+static cell AMX_NATIVE_CALL amxx_mem_flush_all(AMX *amx, cell *params)
+{
+	g_MemStore.FlushAll();
+	return 1;
+}
+
 AMX_NATIVE_INFO MemStore_natives[] = {
 	{"mem_set_int",             amxx_mem_set_int},
 	{"mem_get_int",             amxx_mem_get_int},
@@ -697,5 +989,13 @@ AMX_NATIVE_INFO MemStore_natives[] = {
 	{"mem_rank_delete",         amxx_mem_rank_delete},
 	{"mem_rank_clear",          amxx_mem_rank_clear},
 	{"mem_set_limits",          amxx_mem_set_limits},
+	{"mem_inc_int",             amxx_mem_inc_int},
+	{"mem_inc_float",           amxx_mem_inc_float},
+	{"mem_rank_inc",            amxx_mem_rank_inc},
+	{"mem_get_ttl",             amxx_mem_get_ttl},
+	{"mem_rank_get_range",      amxx_mem_rank_get_range},
+	{"mem_rank_exists",         amxx_mem_rank_exists},
+	{"mem_get_memory_stats",    amxx_mem_get_memory_stats},
+	{"mem_flush_all",           amxx_mem_flush_all},
 	{nullptr,                   nullptr}
 };

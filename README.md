@@ -19,13 +19,22 @@ Unlike `nVault` (which incurs disk I/O latency) or `localinfo` (which is severel
 - **Dynamic Arrays & Schema Validation**: `mem_get_array()` provides an optional `&copied_size` output parameter returning the exact count of cells copied. Ideal for variable-sized lists (inventories, weapon loadouts) and struct-size schema validation.
 - **Unified Single-Namespace Architecture**: Each namespace independently maintains both a Key-Value table and a Sorted Rank Leaderboard. Composite arrays and leaderboard ranks can share the exact same namespace and entity key (`authid`) without collision.
 - **Native Leaderboard & Ranking Engine (ZSET)**:
-  - In-RAM sorted sets with instant score lookup (`mem_rank_set`, `mem_rank_get_top`, `mem_rank_get_pos`).
+  - In-RAM sorted sets with instant score lookup (`mem_rank_set`, `mem_rank_get_top`, `mem_rank_get_pos`, `mem_rank_exists`).
   - Supports descending order (`RANK_DESC`) for kills/points and ascending order (`RANK_ASC`) for speedruns/race timers.
+  - High-performance batch retrieval: `mem_rank_get_range()` retrieves contiguous slices into 2D arrays in a single call.
+  - Atomic ranking increments: `mem_rank_inc()` (Redis `ZINCRBY` equivalent).
   - Deterministic tie-breaking for equal scores.
+- **Atomic Arithmetic Engine**:
+  - In-place increments and decrements via `mem_inc_int()`, `mem_inc_float()`, and `mem_rank_inc()` without duplicate hash lookups or intermediate variable fetching.
+- **TTL Introspection**:
+  - `mem_get_ttl()` returns the exact remaining seconds for active time-limited entries.
 - **Zero-Handle Key Enumeration**:
   - Index-based key lookup: `mem_get_key_at(namespace, index, dest, maxlen)` and `mem_get_namespace_count(namespace)`.
   - Public callback iteration: `mem_iterate_keys(namespace, "MyCallback")`.
   - Iterate through keys in a namespace without allocating or tracking Pawn handles.
+- **Diagnostics & Management**:
+  - `mem_get_memory_stats()` provides real-time RAM usage and namespace count metrics.
+  - `mem_flush_all()` allows complete in-RAM wipe without server reboot.
 - **Namespace Sandboxing**: Multiple plugins can safely coexist without key name collisions.
 - **Flexible Expiration Policies**:
   - `EXP_PERSISTENT`: Retained in RAM across map changes until server reboot.
